@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__claude-smart-tools__understand",
+      "Bash(rm:*)",
+      "Bash(python:*)",
+      "mcp__claude-smart-tools__collaborate",
+      "Bash(ls:*)",
+      "mcp__gemini-review__analyze_code",
+      "mcp__claude-smart-tools__investigate",
+      "mcp__claude-smart-tools__validate",
+      "mcp__claude-smart-tools__full_analysis",
+      "Bash(where git)",
+      "Bash(\"C:\\Program Files\\Git\\cmd\\git.exe\" status)",
+      "Bash(git init:*)",
+      "Bash(git add:*)",
+      "Bash(git rm:*)"
+    ],
+    "deny": []
+  }
+}

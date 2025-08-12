@@ -1,0 +1,29 @@
+# Environment and secrets
+.env
+*.env
+
+# Invalid files
+nul
+
+# Cache and temp files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.cache
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Embedded git repository (will be handled as submodule later)
+gemini-engines/
+
+# Logs
+logs/
+*.log
