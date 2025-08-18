@@ -69,46 +69,140 @@ class SmartToolsMcpServer:
     async def initialize_engines(self):
         """Initialize engine wrappers from original tool implementations"""
         try:
-            # Change to gemini-engines directory for proper imports
             import os
+            import pathlib
+            
+            # Get absolute paths without changing directories - venv compatible approach
             current_dir = os.getcwd()
-            gemini_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gemini-engines")
+            smart_tools_root = pathlib.Path(__file__).parent.parent.absolute()
+            gemini_path = smart_tools_root / "gemini-engines"
             
-            logger.info(f"Initializing engines from {gemini_path}...")
+            # Environment diagnostics for debugging
+            logger.info("=== Engine Initialization Diagnostics ===")
+            logger.info(f"Current working directory: {current_dir}")
+            logger.info(f"Smart tools root: {smart_tools_root}")
+            logger.info(f"Gemini engines path: {gemini_path}")
+            logger.info(f"Gemini path exists: {gemini_path.exists()}")
             
-            # Change directory and add to path for imports
-            os.chdir(gemini_path)
-            if gemini_path not in sys.path:
-                sys.path.insert(0, gemini_path)
+            # Detect if running in virtual environment
+            in_venv = (hasattr(sys, 'real_prefix') or 
+                      (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix))
+            logger.info(f"Virtual environment detected: {in_venv}")
+            logger.info(f"Python executable: {sys.executable}")
+            logger.info(f"Python prefix: {sys.prefix}")
+            if in_venv:
+                logger.info(f"Base prefix: {getattr(sys, 'base_prefix', 'N/A')}")
             
-            # Now import the Gemini implementations directly
-            from src.services.gemini_tool_implementations import GeminiToolImplementations
-            from src.clients.gemini_client import GeminiClient
+            # Add gemini-engines to sys.path without changing working directory
+            gemini_path_str = str(gemini_path)
+            if gemini_path_str not in sys.path:
+                sys.path.insert(0, gemini_path_str)
+                logger.info(f"Added {gemini_path_str} to sys.path")
             
-            # Create instances with CPU throttling configuration
-            tool_impl = GeminiToolImplementations()
-            gemini_client = GeminiClient(config)  # Pass config for CPU throttling
+            # Environment variable diagnostics and fallback detection
+            api_key = os.environ.get('GOOGLE_API_KEY')
+            api_key2 = os.environ.get('GOOGLE_API_KEY2')
+            logger.info(f"GOOGLE_API_KEY available: {'YES' if api_key else 'NO'}")
+            logger.info(f"GOOGLE_API_KEY2 available: {'YES' if api_key2 else 'NO'}")
+            
+            # Fallback for Claude Code bug #1254 - environment variables not passed to MCP servers
+            if not api_key and not api_key2:
+                logger.warning("⚠️ No API keys found - attempting fallback detection")
+                
+                # Check if variables show as unexpanded (Claude Code bug symptom)
+                raw_key1 = os.environ.get('GOOGLE_API_KEY', '')
+                raw_key2 = os.environ.get('GOOGLE_API_KEY2', '')
+                if raw_key1.startswith('%') or raw_key2.startswith('%'):
+                    logger.warning(f"Environment variables appear unexpanded: KEY1='{raw_key1}', KEY2='{raw_key2}'")
+                    logger.warning("This indicates Claude Code bug #1254 - env vars not properly passed to MCP servers")
+                
+                # Try to load from system environment as fallback
+                try:
+                    import subprocess
+                    result = subprocess.run(['echo', '%GOOGLE_API_KEY%'], shell=True, capture_output=True, text=True)
+                    if result.returncode == 0 and result.stdout.strip() != '%GOOGLE_API_KEY%':
+                        api_key = result.stdout.strip()
+                        logger.info("✅ Recovered API key via fallback method")
+                except Exception as e:
+                    logger.warning(f"Fallback environment variable detection failed: {e}")
+            
+            # Final API key status
+            has_api_key = bool(api_key or api_key2)
+            logger.info(f"Final API key status: {'AVAILABLE' if has_api_key else 'MISSING'}")
+            
+            # Import using absolute path - no directory switching needed
+            logger.info("Attempting imports from gemini-engines...")
+            try:
+                from src.services.gemini_tool_implementations import GeminiToolImplementations
+                logger.info("✅ Successfully imported GeminiToolImplementations")
+            except Exception as e:
+                logger.error(f"❌ Failed to import GeminiToolImplementations: {e}")
+                raise
+                
+            try:
+                from src.clients.gemini_client import GeminiClient
+                logger.info("✅ Successfully imported GeminiClient")
+            except Exception as e:
+                logger.error(f"❌ Failed to import GeminiClient: {e}")
+                raise
+                
+            try:
+                import google.generativeai as genai
+                logger.info("✅ Successfully imported google.generativeai")
+            except Exception as e:
+                logger.error(f"❌ Failed to import google.generativeai: {e}")
+                raise
+            
+            # Create instances
+            logger.info("Creating GeminiToolImplementations instance...")
+            try:
+                tool_impl = GeminiToolImplementations()
+                logger.info("✅ Successfully created GeminiToolImplementations")
+            except Exception as e:
+                logger.error(f"❌ Failed to create GeminiToolImplementations: {e}")
+                raise
+                
+            logger.info("Creating GeminiClient instance...")
+            try:
+                gemini_client = GeminiClient(config)
+                logger.info("✅ Successfully created GeminiClient")
+            except Exception as e:
+                logger.error(f"❌ Failed to create GeminiClient: {e}")
+                raise
             
             # Configure Gemini API
-            import google.generativeai as genai
-            api_key = os.environ.get('GOOGLE_API_KEY')
             if api_key:
                 genai.configure(api_key=api_key)
-                logger.info(f"Configured Gemini API with key: {api_key[:10]}...")
+                logger.info(f"✅ Configured Gemini API with key: {api_key[:10]}...")
+            else:
+                logger.warning("⚠️ No GOOGLE_API_KEY found in environment")
             
-            # Restore to smart tools directory to import EngineWrapper
-            os.chdir(current_dir)
+            # No directory restoration needed - we never changed it
             
-            # Add smart tools src to path for imports
-            smart_tools_src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
-            if smart_tools_src not in sys.path:
-                sys.path.insert(0, smart_tools_src)
+            # Add smart tools src to path for engine wrapper imports (using pathlib)
+            smart_tools_src = smart_tools_root / "src"
+            smart_tools_src_str = str(smart_tools_src)
+            if smart_tools_src_str not in sys.path:
+                sys.path.insert(0, smart_tools_src_str)
+                logger.info(f"Added {smart_tools_src_str} to sys.path")
             
             # Create engine wrappers using the factory with monkey patch
-            from engines.engine_wrapper import EngineFactory
+            logger.info("Importing EngineFactory...")
+            try:
+                from engines.engine_wrapper import EngineFactory
+                logger.info("✅ Successfully imported EngineFactory")
+            except Exception as e:
+                logger.error(f"❌ Failed to import EngineFactory: {e}")
+                raise
             
             # Use factory method to create engines with WindowsPath monkey patch applied
-            self.engines = EngineFactory.create_engines_from_original(tool_impl)
+            logger.info("Creating engines from original tool implementations...")
+            try:
+                self.engines = EngineFactory.create_engines_from_original(tool_impl)
+                logger.info(f"✅ Successfully created {len(self.engines)} engines via factory")
+            except Exception as e:
+                logger.error(f"❌ Failed to create engines via factory: {e}")
+                raise
             
             # Add the missing engines that aren't in the factory method
             from engines.engine_wrapper import EngineWrapper
@@ -142,10 +236,22 @@ class SmartToolsMcpServer:
             logger.info(f"Initialized {len(self.engines)} engines and {len(self.smart_tools)} smart tools")
             
         except Exception as e:
+            import traceback
             logger.error(f"Failed to initialize engines: {e}")
-            # Fallback to empty engines for development
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
+            
+            # Enhanced fallback to at least provide all 7 tools with empty engines
+            logger.warning("⚠️ Falling back to empty engines - tools will have limited functionality")
             self.engines = {}
-            self.smart_tools = {'understand': UnderstandTool({})}
+            self.smart_tools = {
+                'understand': UnderstandTool({}),
+                'investigate': InvestigateTool({}),
+                'validate': ValidateTool({}),
+                'collaborate': CollaborateTool({}),
+                'propose_tests': ProposeTestsTool({}),
+                'deploy': DeployTool({}),
+                'full_analysis': FullAnalysisTool({}, {})
+            }
     
     def setup_handlers(self):
         """Setup MCP protocol handlers for the 7 smart tools"""
