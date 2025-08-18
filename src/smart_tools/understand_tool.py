@@ -3,10 +3,24 @@ Understand Tool - Deep Comprehension Smart Tool
 Helps Claude quickly grasp unfamiliar codebases, architectures, patterns
 """
 import os
+import sys
 from pathlib import Path
 from typing import Dict, Any, List, Union
-from .base_smart_tool import BaseSmartTool, SmartToolResult
-from .executive_synthesizer import ExecutiveSynthesizer
+
+# Handle imports for both module and script execution
+try:
+    from .base_smart_tool import BaseSmartTool, SmartToolResult
+    from .executive_synthesizer import ExecutiveSynthesizer
+except ImportError:
+    # Add current directory to path for script execution
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    if current_dir not in sys.path:
+        sys.path.insert(0, current_dir)
+    from base_smart_tool import BaseSmartTool, SmartToolResult
+    from executive_synthesizer import ExecutiveSynthesizer
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 class UnderstandTool(BaseSmartTool):
@@ -95,6 +109,20 @@ class UnderstandTool(BaseSmartTool):
         """
         Execute understanding analysis with intelligent routing
         """
+        # CRITICAL FIX: Ensure files is always a list of strings
+        # Handle case where a single WindowsPath object might be passed
+        from pathlib import Path
+        if isinstance(files, (str, Path)) or hasattr(files, '__fspath__'):
+            files = [str(files)]
+            logger.debug(f"Converted single path to list: {files}")
+        elif isinstance(files, (list, tuple)):
+            files = [str(f) for f in files]
+            logger.debug(f"Normalized {len(files)} file paths to strings")
+        else:
+            # Fallback for unexpected types
+            files = [str(files)]
+            logger.warning(f"Unexpected files type {type(files)}, converted to string list")
+        
         routing_strategy = self.get_routing_strategy(files=files, question=question, **kwargs)
         engines_used = []
         results = {}
@@ -137,6 +165,16 @@ class UnderstandTool(BaseSmartTool):
                     )
                     results['documentation'] = doc_result
                     engines_used.append('analyze_docs')
+            
+            # Phase 4: Dependency analysis for architectural understanding
+            if 'map_dependencies' in routing_strategy['engines']:
+                dep_result = await self.execute_engine(
+                    'map_dependencies',
+                    project_paths=files,
+                    analysis_depth='transitive'
+                )
+                results['dependencies'] = dep_result
+                engines_used.append('map_dependencies')
             
             # Synthesize results
             synthesized_result = self._synthesize_understanding(results, question)
@@ -196,6 +234,12 @@ class UnderstandTool(BaseSmartTool):
                 engines.append('analyze_docs')
                 reasoning_parts.append(f"Including documentation analysis ({len(doc_files)} docs found)")
         
+        # Add dependency analysis for multi-file projects or architectural questions
+        if files and (len(files) > 1 or (question and any(keyword in question.lower() for keyword in 
+                    ['architecture', 'dependency', 'dependencies', 'structure', 'coupling', 'component']))):
+            engines.append('map_dependencies')
+            reasoning_parts.append("Adding dependency analysis for architectural understanding")
+        
         # Prioritize based on file count
         if files and len(files) > 20:
             reasoning_parts.append("Large codebase - focusing on high-level architecture first")
@@ -233,6 +277,12 @@ class UnderstandTool(BaseSmartTool):
             synthesis.append(str(results['documentation']))
             synthesis.append("")
         
+        # Dependency analysis
+        if 'dependencies' in results:
+            synthesis.append("## 🔗 Dependency Analysis")
+            synthesis.append(str(results['dependencies']))
+            synthesis.append("")
+        
         # Summary and key takeaways
         synthesis.append("## 💡 Key Understanding Points")
         synthesis.append(self._extract_key_points(results))
@@ -255,6 +305,9 @@ class UnderstandTool(BaseSmartTool):
         
         if 'documentation' in results:
             points.append("- **Documentation**: Context and design decisions from docs reviewed")
+        
+        if 'dependencies' in results:
+            points.append("- **Dependencies**: Component relationships, coupling analysis, and dependency graph insights")
         
         if not points:
             points.append("- Analysis completed - see detailed results above")

@@ -37,13 +37,17 @@ class SmartToolsConfig(BaseSettings):
     enable_multi_engine_synthesis: bool = Field(True, env="ENABLE_MULTI_ENGINE_SYNTHESIS")
     max_engines_per_smart_tool: int = Field(5, env="MAX_ENGINES_PER_SMART_TOOL")
     
-    # CPU Performance Configuration - Inherit from original
+    # CPU Performance Configuration - Unified timing for consistency
     file_scan_yield_frequency: int = Field(50, env="FILE_SCAN_YIELD_FREQUENCY")
     processing_yield_interval_ms: int = Field(100, env="PROCESSING_YIELD_INTERVAL_MS")
     max_cpu_usage_percent: float = Field(80.0, env="MAX_CPU_USAGE_PERCENT")
     cpu_check_interval: int = Field(10, env="CPU_CHECK_INTERVAL")
     max_concurrent_reviews: int = Field(4, env="MAX_CONCURRENT_REVIEWS")
     enable_streaming_responses: bool = Field(True, env="ENABLE_STREAMING_RESPONSES")
+    
+    # CPU Throttling - Additional unified parameters to resolve timing conflicts
+    cpu_check_interval_seconds: float = Field(0.1, env="CPU_CHECK_INTERVAL_SECONDS")  # How often to check CPU
+    api_call_check_interval_seconds: float = Field(0.5, env="API_CALL_CHECK_INTERVAL_SECONDS")  # API monitoring interval
     
     # Rate Limiting Configuration - Inherit sophisticated settings
     enable_pre_blocking: bool = Field(False, env="ENABLE_PRE_BLOCKING")

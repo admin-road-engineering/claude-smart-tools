@@ -1,6 +1,6 @@
 """
 Smart Tools MCP Server
-Consolidated 5-tool interface with intelligent routing
+Consolidated 7-tool interface with intelligent routing
 """
 import asyncio
 import json
@@ -20,44 +20,51 @@ except ImportError as e:
     print("Install with: pip install mcp", file=sys.stderr)
     sys.exit(1)
 
-# Import smart tools
-try:
-    # Try relative imports first (when run as module)
-    from .smart_tools.understand_tool import UnderstandTool
-    from .smart_tools.investigate_tool import InvestigateTool
-    from .smart_tools.validate_tool import ValidateTool
-    from .smart_tools.collaborate_tool import CollaborateTool
-    from .smart_tools.full_analysis_tool import FullAnalysisTool
-    from .smart_tools.base_smart_tool import SmartToolResult
-    from .engines.original_tool_adapter import OriginalToolAdapter
-    from .routing.intent_analyzer import IntentAnalyzer, ToolIntent
-except ImportError:
-    # Fall back to absolute imports (when run as script)
-    import sys
-    import os
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from smart_tools.understand_tool import UnderstandTool
-    from smart_tools.investigate_tool import InvestigateTool
-    from smart_tools.validate_tool import ValidateTool
-    from smart_tools.collaborate_tool import CollaborateTool
-    from smart_tools.full_analysis_tool import FullAnalysisTool
-    from smart_tools.base_smart_tool import SmartToolResult
-    from engines.original_tool_adapter import OriginalToolAdapter
-    from routing.intent_analyzer import IntentAnalyzer, ToolIntent
+# Import smart tools - use absolute imports for MCP execution
+import sys
+import os
+
+# Add the src directory to Python path for proper imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
+# Direct absolute imports (no relative imports to avoid MCP execution issues)
+from smart_tools.understand_tool import UnderstandTool
+from smart_tools.investigate_tool import InvestigateTool
+from smart_tools.validate_tool import ValidateTool  
+from smart_tools.collaborate_tool import CollaborateTool
+from smart_tools.full_analysis_tool import FullAnalysisTool
+from smart_tools.propose_tests_tool import ProposeTestsTool
+from smart_tools.deploy_tool import DeployTool
+from smart_tools.base_smart_tool import SmartToolResult
+from engines.original_tool_adapter import OriginalToolAdapter
+from routing.intent_analyzer import IntentAnalyzer, ToolIntent
+from services.cpu_throttler import CPUThrottler
+from config import config
 
 logger = logging.getLogger(__name__)
 
 
 class SmartToolsMcpServer:
-    """MCP server with 5 intelligent tools"""
+    """MCP server with 7 intelligent tools"""
     
     def __init__(self):
         self.server = Server("claude-smart-tools")
         self.engines = {}
         self.smart_tools = {}
+        
+        # Initialize CPU throttler singleton early
+        try:
+            self.cpu_throttler = CPUThrottler.get_instance(config)
+            logger.info("CPU throttler initialized successfully")
+        except Exception as e:
+            logger.warning(f"Failed to initialize CPU throttler: {e}")
+            self.cpu_throttler = None
+        
         self.setup_handlers()
         
-        logger.info("Smart Tools MCP Server initialized with 5 intelligent tools")
+        logger.info("Smart Tools MCP Server initialized with 7 intelligent tools and CPU throttling")
     
     async def initialize_engines(self):
         """Initialize engine wrappers from original tool implementations"""
@@ -78,9 +85,9 @@ class SmartToolsMcpServer:
             from src.services.gemini_tool_implementations import GeminiToolImplementations
             from src.clients.gemini_client import GeminiClient
             
-            # Create instances
+            # Create instances with CPU throttling configuration
             tool_impl = GeminiToolImplementations()
-            gemini_client = GeminiClient()
+            gemini_client = GeminiClient(config)  # Pass config for CPU throttling
             
             # Configure Gemini API
             import google.generativeai as genai
@@ -97,30 +104,19 @@ class SmartToolsMcpServer:
             if smart_tools_src not in sys.path:
                 sys.path.insert(0, smart_tools_src)
             
-            # Create engine wrappers using the adapter
-            from engines.engine_wrapper import EngineWrapper
+            # Create engine wrappers using the factory with monkey patch
+            from engines.engine_wrapper import EngineFactory
             
-            # Map of engine names to their methods
-            engine_configs = {
-                'analyze_code': tool_impl.analyze_code,
-                'search_code': tool_impl.search_code,
-                'check_quality': tool_impl.check_quality,
-                'analyze_docs': tool_impl.analyze_docs,
-                'analyze_logs': tool_impl.analyze_logs,
-                'analyze_database': tool_impl.analyze_database,
-                'performance_profiler': tool_impl.performance_profiler,
-                'config_validator': tool_impl.config_validator,
-                'api_contract_checker': tool_impl.api_contract_checker,
-                'analyze_test_coverage': tool_impl.analyze_test_coverage,
-                'map_dependencies': tool_impl.map_dependencies,
-                'interface_inconsistency_detector': tool_impl.interface_inconsistency_detector,
+            # Use factory method to create engines with WindowsPath monkey patch applied
+            self.engines = EngineFactory.create_engines_from_original(tool_impl)
+            
+            # Add the missing engines that aren't in the factory method
+            from engines.engine_wrapper import EngineWrapper
+            additional_engines = {
                 'review_output': tool_impl.review_output,
                 'full_analysis': tool_impl.full_analysis
             }
-            
-            # Create wrappers
-            self.engines = {}
-            for engine_name, method in engine_configs.items():
+            for engine_name, method in additional_engines.items():
                 self.engines[engine_name] = EngineWrapper(
                     engine_name=engine_name,
                     original_function=method,
@@ -135,7 +131,9 @@ class SmartToolsMcpServer:
                 'understand': UnderstandTool(self.engines),
                 'investigate': InvestigateTool(self.engines),
                 'validate': ValidateTool(self.engines),
-                'collaborate': CollaborateTool(self.engines)
+                'collaborate': CollaborateTool(self.engines),
+                'propose_tests': ProposeTestsTool(self.engines),
+                'deploy': DeployTool(self.engines)
             }
             
             # Initialize full_analysis tool with both engines and other smart tools
@@ -150,14 +148,14 @@ class SmartToolsMcpServer:
             self.smart_tools = {'understand': UnderstandTool({})}
     
     def setup_handlers(self):
-        """Setup MCP protocol handlers for the 5 smart tools"""
+        """Setup MCP protocol handlers for the 7 smart tools"""
         
         @self.server.list_tools()
         async def handle_list_tools() -> List[Tool]:
             return [
                 Tool(
                     name="understand",
-                    description="Deep comprehension tool for unfamiliar codebases, architectures, and patterns. Routes to analyze_code + search_code + analyze_docs.",
+                    description="Deep comprehension tool for unfamiliar codebases, architectures, and patterns. Routes to analyze_code + search_code + analyze_docs + map_dependencies.",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -183,7 +181,7 @@ class SmartToolsMcpServer:
                 
                 Tool(
                     name="investigate",
-                    description="Problem-solving tool for debugging issues, finding root causes, and tracing problems. Routes to search_code + check_quality + analyze_logs + performance_profiler.",
+                    description="Problem-solving tool for debugging issues, finding root causes, and tracing problems. Routes to search_code + check_quality + analyze_logs + performance_profiler + analyze_database + map_dependencies.",
                     inputSchema={
                         "type": "object", 
                         "properties": {
@@ -209,7 +207,7 @@ class SmartToolsMcpServer:
                 
                 Tool(
                     name="validate",
-                    description="Quality assurance tool for checking security, performance, standards, and consistency. Routes to check_quality + config_validator + interface_inconsistency_detector.",
+                    description="Quality assurance tool for checking security, performance, standards, and consistency. Routes to check_quality + config_validator + interface_inconsistency_detector + analyze_test_coverage + api_contract_checker + analyze_database + map_dependencies.",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -260,6 +258,73 @@ class SmartToolsMcpServer:
                                 "description": "Additional context for the discussion"
                             }
                         }
+                    }
+                ),
+                
+                Tool(
+                    name="propose_tests",
+                    description="Test coverage analysis and test generation tool. Routes to analyze_code + analyze_test_coverage + search_code + check_quality to identify untested areas and generate prioritized test proposals.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "files": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Files to analyze for test coverage"
+                            },
+                            "test_type": {
+                                "type": "string",
+                                "enum": ["unit", "integration", "security", "performance", "all"],
+                                "default": "all",
+                                "description": "Type of tests to focus on"
+                            },
+                            "coverage_threshold": {
+                                "type": "number",
+                                "minimum": 0.0,
+                                "maximum": 1.0,
+                                "default": 0.8,
+                                "description": "Target coverage threshold (0.0-1.0)"
+                            },
+                            "priority": {
+                                "type": "string",
+                                "enum": ["low", "medium", "high"],
+                                "default": "high",
+                                "description": "Priority level for test proposals"
+                            }
+                        },
+                        "required": ["files"]
+                    }
+                ),
+                
+                Tool(
+                    name="deploy",
+                    description="Pre-deployment validation and readiness assessment tool. Routes to config_validator + api_contract_checker + check_quality + analyze_database + performance_profiler for comprehensive deployment safety checks.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "files": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Files to validate for deployment"
+                            },
+                            "deployment_stage": {
+                                "type": "string",
+                                "enum": ["development", "staging", "production"],
+                                "default": "production",
+                                "description": "Target deployment stage"
+                            },
+                            "validation_level": {
+                                "type": "string",
+                                "enum": ["essential", "standard", "comprehensive"],
+                                "default": "comprehensive",
+                                "description": "Level of validation to perform"
+                            },
+                            "environment": {
+                                "type": "string",
+                                "description": "Target deployment environment (optional)"
+                            }
+                        },
+                        "required": ["files"]
                     }
                 ),
                 
@@ -320,6 +385,10 @@ class SmartToolsMcpServer:
             return await self._handle_validate(arguments)
         elif tool_name == "collaborate":
             return await self._handle_collaborate(arguments)
+        elif tool_name == "propose_tests":
+            return await self._handle_propose_tests(arguments)
+        elif tool_name == "deploy":
+            return await self._handle_deploy(arguments)
         elif tool_name == "full_analysis":
             return await self._handle_full_analysis(arguments)
         else:
@@ -377,6 +446,32 @@ class SmartToolsMcpServer:
         except Exception as e:
             return f"Collaboration failed: {str(e)}"
     
+    async def _handle_propose_tests(self, arguments: Dict[str, Any]) -> str:
+        """Handle propose_tests tool calls"""
+        try:
+            propose_tests_tool = self.smart_tools.get('propose_tests')
+            if not propose_tests_tool:
+                return "Propose tests tool not available"
+            
+            result = await propose_tests_tool.execute(**arguments)
+            return self._format_smart_tool_result(result)
+            
+        except Exception as e:
+            return f"Test proposal generation failed: {str(e)}"
+    
+    async def _handle_deploy(self, arguments: Dict[str, Any]) -> str:
+        """Handle deploy tool calls"""
+        try:
+            deploy_tool = self.smart_tools.get('deploy')
+            if not deploy_tool:
+                return "Deploy tool not available"
+            
+            result = await deploy_tool.execute(**arguments)
+            return self._format_smart_tool_result(result)
+            
+        except Exception as e:
+            return f"Deployment validation failed: {str(e)}"
+    
     async def _handle_full_analysis(self, arguments: Dict[str, Any]) -> str:
         """Handle full analysis tool calls"""
         try:
@@ -413,9 +508,17 @@ class SmartToolsMcpServer:
         return '\n'.join(formatted)
     
     async def run(self):
-        """Run the MCP server"""
+        """Run the MCP server with CPU throttling"""
         # Initialize engines before starting server
         await self.initialize_engines()
+        
+        # Log CPU throttling status
+        if self.cpu_throttler:
+            stats = self.cpu_throttler.get_throttling_stats()
+            logger.info(f"CPU throttling active: max_cpu={stats['max_cpu_percent']}%, "
+                       f"yield_interval={stats['yield_interval_ms']}ms")
+        else:
+            logger.warning("CPU throttling not available - system may experience freezing under heavy load")
         
         async with stdio_server() as (read_stream, write_stream):
             await self.server.run(

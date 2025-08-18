@@ -279,10 +279,21 @@ class ValidateTool(BaseSmartTool):
             # Filter issues by severity
             filtered_issues = self._filter_issues_by_severity(issues_found, severity)
             
+            # Perform correlation analysis on validation results
+            correlation_data = None
+            if len(validation_results) > 1:
+                correlation_data = await self.analyze_correlations(validation_results)
+            
             # Generate validation report
             validation_report = self._synthesize_validation_report(
                 validation_type, validation_results, filtered_issues, total_issues, routing_strategy
             )
+            
+            # Add correlation report if available
+            if correlation_data:
+                correlation_report = self.format_correlation_report(correlation_data)
+                if correlation_report:
+                    validation_report += "\n\n" + correlation_report
             
             # Apply executive synthesis for better consolidated response
             if self.executive_synthesizer.should_synthesize(self.tool_name):
@@ -302,6 +313,15 @@ class ValidateTool(BaseSmartTool):
             critical_issues = [issue for issue in filtered_issues if issue.get('severity') == 'high']
             validation_success = len(critical_issues) == 0
             
+            # Extract correlation summary for result
+            correlations = None
+            conflicts = None
+            resolutions = None
+            if correlation_data:
+                correlations = correlation_data.get('correlations')
+                conflicts = correlation_data.get('conflicts')
+                resolutions = correlation_data.get('resolutions')
+            
             return SmartToolResult(
                 tool_name="validate",
                 success=validation_success,
@@ -316,7 +336,10 @@ class ValidateTool(BaseSmartTool):
                     "filtered_issues": len(filtered_issues),
                     "critical_issues": len(critical_issues),
                     "phases_completed": len(validation_results)
-                }
+                },
+                correlations=correlations,
+                conflicts=conflicts,
+                resolutions=resolutions
             )
             
         except Exception as e:

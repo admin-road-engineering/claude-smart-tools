@@ -180,10 +180,34 @@ class FullAnalysisTool(BaseSmartTool):
                     analysis_results['test_coverage'] = test_result
                     total_engines_used.append(engine_name)
             
-            # Phase 3: Synthesis and Coordination
+            # Phase 3: Correlation Analysis
+            correlation_data = None
+            if len(analysis_results) > 1:
+                # Extract raw results from smart tool results
+                raw_results = {}
+                for key, result in analysis_results.items():
+                    if hasattr(result, 'result'):
+                        raw_results[key] = result.result
+                    else:
+                        raw_results[key] = result
+                
+                correlation_data = await self.analyze_correlations(raw_results)
+            
+            # Phase 4: Synthesis and Coordination
             comprehensive_report = self._synthesize_comprehensive_analysis(
                 analysis_results, routing_strategy, files, focus, autonomous
             )
+            
+            # Add correlation insights to report
+            if correlation_data:
+                correlation_report = self.format_correlation_report(correlation_data)
+                if correlation_report:
+                    # Insert correlation analysis before recommendations
+                    report_lines = comprehensive_report.split('\n')
+                    insert_idx = next((i for i, line in enumerate(report_lines) 
+                                     if '## 📋 Comprehensive Recommendations' in line), len(report_lines))
+                    report_lines.insert(insert_idx, correlation_report)
+                    comprehensive_report = '\n'.join(report_lines)
             
             # Apply executive synthesis for better consolidated response
             if self.executive_synthesizer.should_synthesize(self.tool_name):
@@ -203,6 +227,15 @@ class FullAnalysisTool(BaseSmartTool):
             # Remove duplicates from engines used
             total_engines_used = list(dict.fromkeys(total_engines_used))
             
+            # Extract correlation details for result
+            correlations = None
+            conflicts = None  
+            resolutions = None
+            if correlation_data:
+                correlations = correlation_data.get('correlations')
+                conflicts = correlation_data.get('conflicts')
+                resolutions = correlation_data.get('resolutions')
+            
             return SmartToolResult(
                 tool_name="full_analysis",
                 success=True,
@@ -218,7 +251,10 @@ class FullAnalysisTool(BaseSmartTool):
                     "engines_used": len(routing_strategy['engines']),
                     "analysis_phases": len(analysis_results),
                     "autonomous_mode": autonomous
-                }
+                },
+                correlations=correlations,
+                conflicts=conflicts,
+                resolutions=resolutions
             )
             
         except Exception as e:

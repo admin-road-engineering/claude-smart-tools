@@ -14,7 +14,18 @@
       "Bash(\"C:\\Program Files\\Git\\cmd\\git.exe\" status)",
       "Bash(git init:*)",
       "Bash(git add:*)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(git remote add:*)",
+      "Bash(git push:*)",
+      "Bash(git remote remove:*)",
+      "Bash(grep:*)",
+      "mcp__claude-smart-tools__propose_tests",
+      "mcp__claude-smart-tools__deploy",
+      "Bash(pip install:*)",
+      "Bash(where claude)",
+      "Bash(find:*)",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)"
     ],
     "deny": []
   }

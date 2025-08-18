@@ -1,5 +1,5 @@
 """
-Gemini AI client with rate limiting and API key management
+Gemini AI client with rate limiting and CPU throttling
 """
 import asyncio
 import json
@@ -21,6 +21,7 @@ from ..config import (
     RATE_LIMIT_FILE,
     config  # Add config instance for new rate limiting settings
 )
+from ..services.cpu_throttler import CPUThrottler
 
 # Simple exception classes for smart tools
 class GeminiApiError(Exception):
@@ -48,9 +49,9 @@ class SimpleCPUThrottler:
 logger = logging.getLogger(__name__)
 
 class GeminiClient:
-    """Gemini AI client with rate limiting, key rotation, and error handling"""
+    """Gemini AI client with rate limiting, key rotation, and CPU throttling"""
     
-    def __init__(self, config=None):
+    def __init__(self, smart_config=None):
         self.keys = API_KEYS
         if not self.keys:
             raise ConfigurationError("At least one API key (GOOGLE_API_KEY or GOOGLE_API_KEY2) is required")
@@ -69,11 +70,9 @@ class GeminiClient:
         self.connect_timeout = GEMINI_CONNECT_TIMEOUT
         self.timeout_retry_count = TIMEOUT_RETRY_COUNT
         
-        # CPU throttling for API operations
-        if config:
-            self.cpu_throttler = SimpleCPUThrottler(config)
-        else:
-            self.cpu_throttler = None
+        # CPU throttling for API operations - use singleton pattern
+        self.config = smart_config or config
+        self.cpu_throttler = CPUThrottler.get_instance(self.config)
         
         # SECURITY: Use granular per-model locks for better concurrency
         # This allows rate limit updates for different models to proceed in parallel
@@ -415,11 +414,8 @@ class GeminiClient:
                 if self.cpu_throttler:
                     await self.cpu_throttler.yield_if_needed()
                 
-                # Make initial API call
-                response = await asyncio.wait_for(
-                    asyncio.to_thread(model.generate_content, prompt),
-                    timeout=timeout
-                )
+                # Make CPU-safe API call with monitoring
+                response = await self._cpu_safe_api_call(model, prompt, timeout, current_model)
                 
                 # Success!
                 if current_model != model_name:
@@ -446,10 +442,8 @@ class GeminiClient:
                             total_attempts += 1
                             logger.info(f"Attempt {total_attempts}: {current_model} with alternate API key {self.current_key_index}")
                             
-                            response = await asyncio.wait_for(
-                                asyncio.to_thread(model.generate_content, prompt),
-                                timeout=timeout
-                            )
+                            # Use CPU-safe API call for alternate key attempts too
+                            response = await self._cpu_safe_api_call(model, prompt, timeout, current_model)
                             
                             # Success with other key!
                             logger.info(f"Success with alternate API key for {current_model}")
@@ -494,6 +488,56 @@ class GeminiClient:
         logger.error(error_msg)
         return (f"Error: {error_msg}", model_name, total_attempts)
     
+    async def _cpu_safe_api_call(self, model, prompt: str, timeout: float, model_name: str):
+        """
+        Make API call with periodic CPU yielding during the wait.
+        Implements Gemini's recommended pattern with verification-based threading.
+        """
+        # Create API task - model.generate_content is synchronous (verified)
+        api_task = asyncio.create_task(
+            asyncio.to_thread(model.generate_content, prompt)
+        )
+        
+        check_interval = self.config.api_call_check_interval_seconds  # 500ms from config
+        elapsed = 0.0
+        yield_count = 0
+        
+        # Monitor with configurable check intervals
+        while not api_task.done():
+            try:
+                # Try to get result with timeout
+                result = await asyncio.wait_for(
+                    asyncio.shield(api_task),
+                    timeout=check_interval
+                )
+                # Task completed successfully
+                logger.debug(f"API call to {model_name} completed after {elapsed:.1f}s, {yield_count} CPU yields")
+                return result
+                
+            except asyncio.TimeoutError:
+                # Task not done yet, check if we should continue
+                elapsed += check_interval
+                if elapsed > timeout:
+                    api_task.cancel()
+                    raise asyncio.TimeoutError(f"API call to {model_name} timed out after {timeout}s")
+                
+                # Yield CPU control and continue monitoring
+                if self.cpu_throttler:
+                    await self.cpu_throttler.yield_if_needed()
+                    yield_count += 1
+                    
+                    # Log CPU throttling status
+                    stats = self.cpu_throttler.get_throttling_stats()
+                    if stats['throttle_active']:
+                        logger.debug(f"CPU throttling active during {model_name} API wait: "
+                                   f"CPU={stats['last_cpu_usage']:.1f}%, yields={yield_count}")
+                else:
+                    # Fallback minimal yield if no throttler
+                    await asyncio.sleep(0.01)
+        
+        # Task completed while we were processing
+        return await api_task
+    
     async def generate_summary(self, prompt: str, timeout: float = None) -> str:
         """Generate summary using flash-lite model (optimized for cost)"""
         try:
@@ -503,10 +547,12 @@ class GeminiClient:
             if timeout is None:
                 timeout = self.base_request_timeout
             
-            response = await asyncio.wait_for(
-                asyncio.to_thread(flash_lite_model.generate_content, prompt),
-                timeout=timeout
-            )
+            # CPU yield before API operation
+            if self.cpu_throttler:
+                await self.cpu_throttler.yield_if_needed()
+            
+            # Use CPU-safe API call for summary generation
+            response = await self._cpu_safe_api_call(flash_lite_model, prompt, timeout, "flash-lite")
             
             return response.text
             
