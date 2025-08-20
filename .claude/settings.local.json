@@ -41,7 +41,16 @@
       "Bash(else echo \"GOOGLE_API_KEY is NOT set\")",
       "Bash(fi)",
       "Bash(timeout:*)",
-      "Bash(true)"
+      "Bash(true)",
+      "Bash(\"C:\\Users\\Admin\\miniconda3\\python.exe\" diagnostic_tool.py)",
+      "Bash(\"C:\\Users\\Admin\\miniconda3\\python.exe\" -m venv test-venv)",
+      "Bash(\"test-venv\\Scripts\\activate.bat\")",
+      "Bash(\"test-venv\\Scripts\\python.exe\" diagnostic_tool.py)",
+      "Bash(\"C:\\Users\\Admin\\miniconda3\\python.exe\" smart_mcp_venv.py --help)",
+      "Bash(\"test-venv\\Scripts\\python.exe\":*)",
+      "Bash(\"test-venv\\Scripts\\pip.exe\" install:*)",
+      "Bash(\"C:\\Users\\Admin\\miniconda3\\python.exe\" test_venv_file_resolution.py)",
+      "Bash(\"C:\\Users\\Admin\\miniconda3\\python.exe\" -c \"\nimport tempfile\nfrom pathlib import Path\nimport os\n\n# Create test project\ntemp_dir = tempfile.mkdtemp(prefix=''smart_tools_test_'')\ntest_file = Path(temp_dir) / ''test.py''\ntest_file.write_text(''def hello(): return \"\"Hello from VENV project!\"\"'')\n\nprint(f''Created test file: {test_file}'')\n\n# Change to test project directory (simulate user in VENV)\nos.chdir(temp_dir)\nprint(f''Working directory: {os.getcwd()}'')\n\n# Test path resolution\nfrom src.utils.path_utils import normalize_paths\nresult = normalize_paths([''test.py''])\nprint(f''Resolved paths: {result}'')\nprint(f''File exists: {os.path.exists(result[0]) if result else False}'')\n\n# Cleanup\nimport shutil\nshutil.rmtree(temp_dir)\nprint(''✅ Test completed successfully'')\n\")"
     ],
     "deny": []
   }

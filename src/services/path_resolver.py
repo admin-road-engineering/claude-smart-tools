@@ -118,9 +118,17 @@ class PathResolver:
         candidate_roots = []
         
         # Look in common locations relative to current working directory
+        # IMPORTANT: When MCP is invoked, cwd is where the user is working
         cwd = Path.cwd()
+        
+        # Get the actual user's working directory from environment if available
+        user_cwd = os.environ.get('USER_CWD', str(cwd))
+        if user_cwd:
+            cwd = Path(user_cwd)
+            logger.info(f"Using user CWD from environment: {cwd}")
+        
         search_bases = [
-            cwd,  # Current directory
+            cwd,  # Current directory (user's actual working directory)
             cwd.parent,  # Parent directory
             cwd.parent.parent,  # Grandparent directory
         ]
