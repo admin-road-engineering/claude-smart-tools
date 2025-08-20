@@ -243,6 +243,14 @@ class ProjectContextReader:
             if len(context['claude_md_content']) > 1000:
                 formatted.append("... (truncated)")
         
+        # Include actual GEMINI.md content if found
+        if context.get('gemini_md_content'):
+            formatted.append("\n=== PROJECT GEMINI.MD ===")
+            # Include first 1000 chars of GEMINI.md
+            formatted.append(context['gemini_md_content'][:1000])
+            if len(context['gemini_md_content']) > 1000:
+                formatted.append("... (truncated)")
+        
         return '\n'.join(formatted)
 
 
