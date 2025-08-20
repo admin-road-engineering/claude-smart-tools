@@ -124,17 +124,32 @@ class SmartToolsMcpServer:
             has_api_key = bool(api_key or api_key2)
             logger.info(f"Final API key status: {'AVAILABLE' if has_api_key else 'MISSING'}")
             
-            # Import from local gemini_engines - self-contained approach like gemini-review
-            logger.info("Attempting imports from local gemini_engines...")
+            # Import from local gemini-engines directory
+            logger.info("Attempting imports from local gemini-engines...")
+            
+            # Add gemini-engines to path for imports
+            import sys
+            import os
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(current_dir)
+            gemini_engines_path = os.path.join(project_root, "gemini-engines")
+            
+            if os.path.exists(gemini_engines_path):
+                if gemini_engines_path not in sys.path:
+                    sys.path.insert(0, gemini_engines_path)
+                    logger.info(f"Added gemini-engines to path: {gemini_engines_path}")
+            else:
+                logger.error(f"gemini-engines directory not found at: {gemini_engines_path}")
+            
             try:
-                from gemini_engines.services.gemini_tool_implementations import GeminiToolImplementations
+                from src.services.gemini_tool_implementations import GeminiToolImplementations
                 logger.info("✅ Successfully imported GeminiToolImplementations")
             except Exception as e:
                 logger.error(f"❌ Failed to import GeminiToolImplementations: {e}")
                 raise
                 
             try:
-                from gemini_engines.clients.gemini_client import GeminiClient
+                from src.clients.gemini_client import GeminiClient
                 logger.info("✅ Successfully imported GeminiClient")
             except Exception as e:
                 logger.error(f"❌ Failed to import GeminiClient: {e}")
