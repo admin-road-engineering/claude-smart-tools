@@ -154,6 +154,11 @@ class ValidateTool(BaseSmartTool):
         with memory safeguards and robust error aggregation
         """
         try:
+            # Read project context early for all engines to use
+            project_context = await self._get_project_context(files)
+            if project_context and project_context.get('claude_md_content'):
+                logger.info(f"Using project-specific CLAUDE.md for validation ({len(project_context['claude_md_content'])} chars)")
+            
             # Memory safeguard: Check available memory before parallel execution
             memory = psutil.virtual_memory()
             if memory.percent > 85:

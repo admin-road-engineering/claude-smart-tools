@@ -11,6 +11,7 @@ import os
 # Handle imports for both module and script execution
 try:
     from ..services.cpu_throttler import get_cpu_throttler
+    from ..utils.project_context import get_project_context_reader
 except ImportError:
     # Add parent directory to path for script execution
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -18,6 +19,7 @@ except ImportError:
     if parent_dir not in sys.path:
         sys.path.insert(0, parent_dir)
     from services.cpu_throttler import get_cpu_throttler
+    from utils.project_context import get_project_context_reader
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +63,12 @@ class BaseSmartTool(ABC):
             '.py,.js,.ts,.java,.cpp,.c,.go,.rs,.cs,.rb,.php,.yaml,.json,.toml').split(',')
         self._cache_dir_limit = int(os.environ.get('CACHE_DIR_LIMIT', '100'))
         
+        # Initialize project context reader
+        self.context_reader = get_project_context_reader()
+        self._project_context_cache = {}  # Cache project context per execution
+        
         if self.cpu_throttler:
-            logger.debug(f"Smart tool {self.tool_name} initialized with CPU throttling and file caching")
+            logger.debug(f"Smart tool {self.tool_name} initialized with CPU throttling, file caching, and project context awareness")
         else:
             logger.warning(f"Smart tool {self.tool_name} initialized without CPU throttling")
     
@@ -81,7 +87,7 @@ class BaseSmartTool(ABC):
         return list(self.engines.keys())
     
     async def execute_engine(self, engine_name: str, **kwargs) -> Any:
-        """Execute a specific engine with improved error handling, CPU throttling, and file caching"""
+        """Execute a specific engine with improved error handling, CPU throttling, file caching, and project context"""
         if engine_name not in self.engines:
             return f"Engine {engine_name} not available"
         
@@ -98,6 +104,15 @@ class BaseSmartTool(ABC):
                       'project_paths']
         
         normalized_kwargs = kwargs.copy()
+        
+        # Add project context to kwargs if we have files/paths
+        files_for_context = self._extract_files_from_kwargs(normalized_kwargs, path_params)
+        if files_for_context:
+            project_context = await self._get_project_context(files_for_context)
+            if project_context and project_context.get('context_files_found'):
+                # Add formatted context to kwargs for engines that can use it
+                normalized_kwargs['project_context'] = self.context_reader.format_context_for_analysis(project_context)
+                logger.info(f"Added project context from {len(project_context['context_files_found'])} files to {engine_name}")
         for param in path_params:
             if param in normalized_kwargs:
                 value = normalized_kwargs[param]
@@ -299,4 +314,41 @@ class BaseSmartTool(ABC):
     def clear_cache(self) -> None:
         """Clear the file content cache to free memory"""
         self._file_content_cache.clear()
-        logger.info(f"Cleared file cache. Stats: {self.get_cache_stats()}")
+        self._project_context_cache.clear()
+        logger.info(f"Cleared file and project context cache. Stats: {self.get_cache_stats()}")
+    
+    def _extract_files_from_kwargs(self, kwargs: Dict[str, Any], path_params: List[str]) -> List[str]:
+        """Extract file paths from kwargs for context reading"""
+        files = []
+        for param in path_params:
+            if param in kwargs:
+                value = kwargs[param]
+                if isinstance(value, (list, tuple)):
+                    files.extend([str(item) for item in value])
+                elif value is not None:
+                    files.append(str(value))
+        return files
+    
+    async def _get_project_context(self, files: List[str]) -> Dict[str, Any]:
+        """Get project context for the given files (cached per execution)"""
+        # Create a cache key from sorted file paths
+        cache_key = '|'.join(sorted(files[:5]))  # Use first 5 files for cache key
+        
+        if cache_key in self._project_context_cache:
+            logger.debug(f"Using cached project context for {len(files)} files")
+            return self._project_context_cache[cache_key]
+        
+        # Read project context
+        logger.info(f"Reading project context for {len(files)} files")
+        context = self.context_reader.read_project_context(files)
+        
+        # Cache the context
+        self._project_context_cache[cache_key] = context
+        
+        # Log what we found
+        if context.get('claude_md_content'):
+            logger.info(f"Found project CLAUDE.md with {len(context['claude_md_content'])} chars")
+        if context.get('project_type'):
+            logger.info(f"Detected project type: {context['project_type']}")
+        
+        return context

@@ -69,6 +69,24 @@ class CollaborateTool(BaseSmartTool):
         Execute collaborative dialogue using the review_output engine
         """
         try:
+            # If a file_path is provided, try to read project context from its location
+            project_context_str = None
+            if file_path:
+                project_context = await self._get_project_context([file_path])
+                if project_context and project_context.get('claude_md_content'):
+                    project_context_str = self.context_reader.format_context_for_analysis(project_context)
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.info(f"Using project-specific CLAUDE.md for collaboration ({len(project_context['claude_md_content'])} chars)")
+            
+            # Merge project context with any explicitly provided context
+            if project_context_str:
+                if context:
+                    # Combine both contexts
+                    context = f"{project_context_str}\n\n=== USER PROVIDED CONTEXT ===\n{context}"
+                else:
+                    context = project_context_str
+            
             routing_strategy = self.get_routing_strategy(
                 content=content, file_path=file_path, discussion_type=discussion_type, 
                 context=context, **kwargs

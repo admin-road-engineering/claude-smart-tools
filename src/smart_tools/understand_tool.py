@@ -130,6 +130,11 @@ class UnderstandTool(BaseSmartTool):
         try:
             import asyncio
             
+            # Read project context early for all engines to use
+            project_context = await self._get_project_context(files)
+            if project_context and project_context.get('claude_md_content'):
+                logger.info(f"Using project-specific CLAUDE.md for understanding ({len(project_context['claude_md_content'])} chars)")
+            
             # Pre-compute documentation files for parallel execution
             doc_files = self._find_documentation_files(files) if 'analyze_docs' in routing_strategy['engines'] else []
             

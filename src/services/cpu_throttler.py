@@ -30,27 +30,30 @@ class CPUThrottler:
         if CPUThrottler._initialized:
             return
         
-        if config is None:
-            raise ValueError("CPU throttler requires configuration on first initialization")
-        
-        self.config = config
-        
-        # CPU throttling configuration - unified from claude-gemini-mcp
-        self.yield_interval_ms = getattr(config, 'processing_yield_interval_ms', 100)
-        self.max_cpu_percent = getattr(config, 'max_cpu_usage_percent', 80.0)
-        self.cpu_check_interval = getattr(config, 'cpu_check_interval', 10)
-        self.file_scan_yield_frequency = getattr(config, 'file_scan_yield_frequency', 50)
-        
-        # State tracking
+        # Initialize basic attributes even if config is None
+        # This prevents AttributeError when methods are called
         self._last_yield_time = time.time()
         self._operation_count = 0
         self._cpu_warnings = 0
         self._throttle_active = False
-        
-        # CPU monitoring cache (to avoid excessive psutil calls)
         self._last_cpu_check = 0
         self._cached_cpu_percent = 0.0
         self._cpu_cache_duration = 1.0  # Cache CPU readings for 1 second
+        
+        if config is None:
+            # Use sensible defaults when no config provided
+            self.yield_interval_ms = 100
+            self.max_cpu_percent = 80.0
+            self.cpu_check_interval = 10
+            self.file_scan_yield_frequency = 50
+            logger.warning("CPU throttler initialized with default configuration")
+        else:
+            self.config = config
+            # CPU throttling configuration - unified from claude-gemini-mcp
+            self.yield_interval_ms = getattr(config, 'processing_yield_interval_ms', 100)
+            self.max_cpu_percent = getattr(config, 'max_cpu_usage_percent', 80.0)
+            self.cpu_check_interval = getattr(config, 'cpu_check_interval', 10)
+            self.file_scan_yield_frequency = getattr(config, 'file_scan_yield_frequency', 50)
         
         CPUThrottler._initialized = True
         
