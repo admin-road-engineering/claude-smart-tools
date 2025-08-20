@@ -200,7 +200,7 @@ class SmartToolsMcpServer:
             # Use factory method to create engines with WindowsPath monkey patch applied
             logger.info("Creating engines from original tool implementations...")
             try:
-                self.engines = EngineFactory.create_engines_from_original(tool_impl)
+                self.engines = EngineFactory.create_engines_from_original(tool_impl, gemini_client)
                 logger.info(f"✅ Successfully created {len(self.engines)} engines via factory")
             except Exception as e:
                 logger.error(f"❌ Failed to create engines via factory: {e}")

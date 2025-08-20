@@ -30,9 +30,10 @@ class EngineWrapper:
     Wraps original tool implementations for use by smart tools with CPU throttling
     """
     
-    def __init__(self, engine_name: str, original_function: Callable, gemini_client=None, **config):
+    def __init__(self, engine_name: str, original_function: Callable, description: str = None, gemini_client=None, **config):
         self.engine_name = engine_name
         self.original_function = original_function
+        self.description = description or f"{engine_name} engine"
         self.gemini_client = gemini_client
         self.config = config
         
@@ -315,9 +316,13 @@ class EngineFactory:
         logger.info("Applied WindowsPath normalization monkey patch to GeminiToolImplementations")
     
     @staticmethod
-    def create_engines_from_original(tool_implementations: Any) -> Dict[str, EngineWrapper]:
+    def create_engines_from_original(tool_implementations: Any, gemini_client: Any = None) -> Dict[str, EngineWrapper]:
         """
         Create engine wrappers from original tool implementation object
+        
+        Args:
+            tool_implementations: GeminiToolImplementations instance
+            gemini_client: Optional GeminiClient instance for engines that need it
         """
         # CRITICAL: Apply monkey patch immediately to fix WindowsPath error
         # This will add the missing _collect_code_from_paths method if needed
@@ -325,26 +330,35 @@ class EngineFactory:
         
         engines = {}
         
-        # Map of engine names to their corresponding methods
+        # Map of engine names to their corresponding methods with descriptions
         engine_methods = {
-            'analyze_code': 'analyze_code',
-            'search_code': 'search_code', 
-            'check_quality': 'check_quality',
-            'analyze_docs': 'analyze_docs',
-            'analyze_logs': 'analyze_logs',
-            'analyze_database': 'analyze_database',
-            'performance_profiler': 'performance_profiler',
-            'config_validator': 'config_validator',
-            'api_contract_checker': 'api_contract_checker',
-            'analyze_test_coverage': 'analyze_test_coverage',
-            'map_dependencies': 'map_dependencies',
-            'interface_inconsistency_detector': 'interface_inconsistency_detector'
+            'analyze_code': ('analyze_code', 'Analyzes code structure and architecture'),
+            'search_code': ('search_code', 'Searches for patterns in code'), 
+            'check_quality': ('check_quality', 'Checks code quality and security'),
+            'analyze_docs': ('analyze_docs', 'Analyzes documentation'),
+            'analyze_logs': ('analyze_logs', 'Analyzes log files'),
+            'analyze_database': ('analyze_database', 'Analyzes database schemas'),
+            'performance_profiler': ('performance_profiler', 'Profiles performance'),
+            'config_validator': ('config_validator', 'Validates configuration'),
+            'api_contract_checker': ('api_contract_checker', 'Checks API contracts'),
+            'analyze_test_coverage': ('analyze_test_coverage', 'Analyzes test coverage'),
+            'map_dependencies': ('map_dependencies', 'Maps dependencies'),
+            'interface_inconsistency_detector': ('interface_inconsistency_detector', 'Detects interface inconsistencies')
         }
         
         # Create wrapper for each engine
-        for engine_name, method_name in engine_methods.items():
+        for engine_name, (method_name, description) in engine_methods.items():
             if hasattr(tool_implementations, method_name):
                 original_method = getattr(tool_implementations, method_name)
-                engines[engine_name] = EngineWrapper(engine_name, original_method)
+                engines[engine_name] = EngineWrapper(
+                    engine_name=engine_name, 
+                    original_function=original_method,
+                    description=description,
+                    gemini_client=gemini_client
+                )
+                logger.info(f"Created engine wrapper for {engine_name}")
+            else:
+                logger.warning(f"Method {method_name} not found in tool implementations")
         
+        logger.info(f"Created {len(engines)} engine wrappers")
         return engines

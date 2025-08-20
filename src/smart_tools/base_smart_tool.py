@@ -140,11 +140,26 @@ class BaseSmartTool(ABC):
             # The cache is used internally to speed up file operations
         
         try:
+            # Check if engine is available
+            if engine_name not in self.engines:
+                error_msg = f"Engine '{engine_name}' not available. Available engines: {list(self.engines.keys())}"
+                logger.error(error_msg)
+                return f"❌ Engine Error: {error_msg}"
+            
             engine = self.engines[engine_name]
+            if engine is None:
+                error_msg = f"Engine '{engine_name}' is None - initialization may have failed"
+                logger.error(error_msg)
+                return f"❌ Engine Error: {error_msg}"
+            
             result = await self._execute_engine_with_retry(engine, engine_name, normalized_kwargs)
             return result
+        except KeyError as e:
+            error_msg = f"Engine '{engine_name}' not found in available engines: {list(self.engines.keys())}"
+            logger.error(error_msg)
+            return f"❌ Engine Error: {error_msg}"
         except Exception as e:
-            # Use standardized error handling
+            # Use standardized error handling for other errors
             context = {
                 'operation': 'engine_execution',
                 'engine_name': engine_name,

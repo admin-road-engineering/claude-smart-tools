@@ -35,7 +35,11 @@
       "Bash(\"C:\\Users\\Admin\\miniconda3\\python.exe\" \"C:\\Users\\Admin\\claude-smart-tools\\src\\smart_mcp_server.py\" --help)",
       "Bash(git stash push:*)",
       "Bash(git commit:*)",
-      "Bash(diff:*)"
+      "Bash(diff:*)",
+      "Bash(if [ -n \"$GOOGLE_API_KEY\" ])",
+      "Bash(then echo \"GOOGLE_API_KEY is set\")",
+      "Bash(else echo \"GOOGLE_API_KEY is NOT set\")",
+      "Bash(fi)"
     ],
     "deny": []
   }
