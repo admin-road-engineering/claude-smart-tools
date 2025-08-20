@@ -7,6 +7,7 @@ import logging
 import sys
 import os
 from pathlib import Path
+import aiofiles
 
 # Handle import for both module and script execution
 try:
@@ -247,8 +248,8 @@ class EngineFactory:
                         # Check extension
                         if not extensions or any(path.suffix == ext for ext in extensions):
                             try:
-                                with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                                    content = f.read()
+                                async with aiofiles.open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                                    content = await f.read()
                                     collected_content.append(f"### File: {path}\n```\n{content}\n```\n")
                                     processed_files.add(path_str)
                             except Exception as e:

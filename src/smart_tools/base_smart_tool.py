@@ -263,20 +263,23 @@ class BaseSmartTool(ABC):
                 if isinstance(paths, (list, tuple)):
                     for path in paths:
                         path = Path(str(path))
-                        if path.is_file():
+                        is_file = await asyncio.to_thread(path.is_file)
+                        if is_file:
                             all_files.add(str(path))
-                        elif path.is_dir():
-                            # For directories, cache configurable source files
-                            for ext in self._cache_extensions:
-                                for file in path.rglob(f'*{ext}'):
-                                    all_files.add(str(file))
-                                    if len(all_files) > self._cache_dir_limit:
-                                        break
+                        else:
+                            is_dir = await asyncio.to_thread(path.is_dir)
+                            if is_dir:
+                                # For directories, cache configurable source files
+                                for ext in self._cache_extensions:
+                                    for file in path.rglob(f'*{ext}'):
+                                        all_files.add(str(file))
+                                        if len(all_files) > self._cache_dir_limit:
+                                            break
         
         # Read files into cache with timestamp validation
         for file_path in all_files:
             try:
-                current_mtime = os.path.getmtime(file_path)
+                current_mtime = await asyncio.to_thread(os.path.getmtime, file_path)
                 
                 # Check if file is in cache and if it's still fresh
                 if file_path in self._file_content_cache:
