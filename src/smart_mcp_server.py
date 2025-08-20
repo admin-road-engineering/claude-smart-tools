@@ -124,28 +124,52 @@ class SmartToolsMcpServer:
             has_api_key = bool(api_key or api_key2)
             logger.info(f"Final API key status: {'AVAILABLE' if has_api_key else 'MISSING'}")
             
-            # Simple path setup for gemini-engines imports
+            # Robust path setup for gemini-engines imports (VENV-compatible)
             logger.info("Setting up gemini-engines import path...")
+            logger.info(f"Current working directory: {os.getcwd()}")
+            logger.info(f"Script file location: {__file__}")
             
-            # Determine gemini-engines path (works in both base Python and VENV)
+            # Multiple fallback strategies for finding gemini-engines
             project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            gemini_engines_path = os.path.join(project_root, "gemini-engines")
+            possible_paths = [
+                os.path.join(project_root, "gemini-engines"),  # Standard location
+                os.path.join(os.getcwd(), "gemini-engines"),  # VENV working directory
+                os.path.join(os.path.dirname(__file__), "..", "..", "gemini-engines"),  # Relative from script
+                "gemini-engines"  # Current directory
+            ]
             
-            # VENV fallback: try current working directory  
-            if not os.path.exists(gemini_engines_path):
-                gemini_engines_path = os.path.join(os.getcwd(), "gemini-engines")
+            gemini_engines_path = None
+            for path in possible_paths:
+                abs_path = os.path.abspath(path)
+                if os.path.exists(abs_path):
+                    gemini_engines_path = abs_path
+                    logger.info(f"Found gemini-engines at: {gemini_engines_path}")
+                    break
+                else:
+                    logger.debug(f"Checked path (not found): {abs_path}")
+            
+            if gemini_engines_path is None:
+                logger.error(f"CRITICAL: gemini-engines directory not found in any of these locations:")
+                for path in possible_paths:
+                    logger.error(f"  - {os.path.abspath(path)}")
+                raise ImportError("gemini-engines directory not found in any expected location")
                 
-            if os.path.exists(gemini_engines_path) and gemini_engines_path not in sys.path:
+            # Add to path if not already there
+            if gemini_engines_path not in sys.path:
                 sys.path.insert(0, gemini_engines_path)
                 logger.info(f"Added gemini-engines to Python path: {gemini_engines_path}")
                 
-                # Simple direct imports
+            # Verify we can import
+            try:
                 from src.services.gemini_tool_implementations import GeminiToolImplementations
                 from src.clients.gemini_client import GeminiClient
                 logger.info("✅ Successfully imported Gemini components")
-            else:
-                logger.error(f"gemini-engines directory not found at: {gemini_engines_path}")
-                raise ImportError("gemini-engines directory not found")
+            except ImportError as import_error:
+                logger.error(f"Failed to import Gemini components: {import_error}")
+                logger.error(f"gemini-engines path: {gemini_engines_path}")
+                logger.error(f"Contents of gemini-engines: {os.listdir(gemini_engines_path) if os.path.exists(gemini_engines_path) else 'NOT FOUND'}")
+                logger.error(f"Current sys.path: {sys.path}")
+                raise
                 
             try:
                 import google.generativeai as genai
