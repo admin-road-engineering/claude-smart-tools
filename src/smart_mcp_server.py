@@ -67,37 +67,26 @@ class SmartToolsMcpServer:
         logger.info("Smart Tools MCP Server initialized with 7 intelligent tools and CPU throttling")
     
     async def initialize_engines(self):
-        """Initialize engine wrappers from original tool implementations"""
+        """Initialize engine wrappers from local gemini_engines - self-contained approach"""
         try:
             import os
-            import pathlib
             
-            # Get absolute paths without changing directories - venv compatible approach
-            current_dir = os.getcwd()
-            smart_tools_root = pathlib.Path(__file__).parent.parent.absolute()
-            gemini_path = smart_tools_root / "gemini-engines"
-            
-            # Environment diagnostics for debugging
+            # Environment diagnostics for debugging  
             logger.info("=== Engine Initialization Diagnostics ===")
-            logger.info(f"Current working directory: {current_dir}")
-            logger.info(f"Smart tools root: {smart_tools_root}")
-            logger.info(f"Gemini engines path: {gemini_path}")
-            logger.info(f"Gemini path exists: {gemini_path.exists()}")
+            logger.info(f"Current working directory: {os.getcwd()}")
+            logger.info(f"Python executable: {sys.executable}")
             
-            # Detect if running in virtual environment
+            # Enhanced virtual environment detection for Claude Code + VENV troubleshooting
             in_venv = (hasattr(sys, 'real_prefix') or 
                       (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix))
             logger.info(f"Virtual environment detected: {in_venv}")
-            logger.info(f"Python executable: {sys.executable}")
-            logger.info(f"Python prefix: {sys.prefix}")
             if in_venv:
+                logger.info(f"Python prefix: {sys.prefix}")
                 logger.info(f"Base prefix: {getattr(sys, 'base_prefix', 'N/A')}")
-            
-            # Add gemini-engines to sys.path without changing working directory
-            gemini_path_str = str(gemini_path)
-            if gemini_path_str not in sys.path:
-                sys.path.insert(0, gemini_path_str)
-                logger.info(f"Added {gemini_path_str} to sys.path")
+                logger.info(f"VENV Mode: Running in virtual environment - enhanced compatibility enabled")
+            else:
+                logger.info(f"Python prefix: {sys.prefix}")
+                logger.info(f"Standard Mode: Running in base Python installation")
             
             # Environment variable diagnostics and fallback detection
             api_key = os.environ.get('GOOGLE_API_KEY')
@@ -105,16 +94,17 @@ class SmartToolsMcpServer:
             logger.info(f"GOOGLE_API_KEY available: {'YES' if api_key else 'NO'}")
             logger.info(f"GOOGLE_API_KEY2 available: {'YES' if api_key2 else 'NO'}")
             
-            # Fallback for Claude Code bug #1254 - environment variables not passed to MCP servers
+            # Enhanced fallback for Claude Desktop + VENV environment variable issues
             if not api_key and not api_key2:
                 logger.warning("⚠️ No API keys found - attempting fallback detection")
                 
-                # Check if variables show as unexpanded (Claude Code bug symptom)
+                # Check if variables show as unexpanded (Claude Desktop VENV bug symptom)
                 raw_key1 = os.environ.get('GOOGLE_API_KEY', '')
                 raw_key2 = os.environ.get('GOOGLE_API_KEY2', '')
                 if raw_key1.startswith('%') or raw_key2.startswith('%'):
-                    logger.warning(f"Environment variables appear unexpanded: KEY1='{raw_key1}', KEY2='{raw_key2}'")
-                    logger.warning("This indicates Claude Code bug #1254 - env vars not properly passed to MCP servers")
+                    logger.error(f"🚨 CRITICAL: Environment variables appear unexpanded: KEY1='{raw_key1}', KEY2='{raw_key2}'")
+                    logger.error("This indicates Claude Desktop + VENV compatibility issue")
+                    logger.error("SOLUTION: Update claude_desktop_config.json to use actual API key values instead of %VARIABLE% syntax")
                 
                 # Try to load from system environment as fallback
                 try:
@@ -123,24 +113,28 @@ class SmartToolsMcpServer:
                     if result.returncode == 0 and result.stdout.strip() != '%GOOGLE_API_KEY%':
                         api_key = result.stdout.strip()
                         logger.info("✅ Recovered API key via fallback method")
+                    else:
+                        logger.error("💥 FALLBACK FAILED: Cannot access API keys - Smart Tools will not function")
                 except Exception as e:
-                    logger.warning(f"Fallback environment variable detection failed: {e}")
+                    logger.error(f"Fallback environment variable detection failed: {e}")
+            elif api_key and api_key2:
+                logger.info("🔑 API Key Configuration: Dual key setup detected - optimal for rate limit handling")
             
             # Final API key status
             has_api_key = bool(api_key or api_key2)
             logger.info(f"Final API key status: {'AVAILABLE' if has_api_key else 'MISSING'}")
             
-            # Import using absolute path - no directory switching needed
-            logger.info("Attempting imports from gemini-engines...")
+            # Import from local gemini_engines - self-contained approach like gemini-review
+            logger.info("Attempting imports from local gemini_engines...")
             try:
-                from src.services.gemini_tool_implementations import GeminiToolImplementations
+                from gemini_engines.services.gemini_tool_implementations import GeminiToolImplementations
                 logger.info("✅ Successfully imported GeminiToolImplementations")
             except Exception as e:
                 logger.error(f"❌ Failed to import GeminiToolImplementations: {e}")
                 raise
                 
             try:
-                from src.clients.gemini_client import GeminiClient
+                from gemini_engines.clients.gemini_client import GeminiClient
                 logger.info("✅ Successfully imported GeminiClient")
             except Exception as e:
                 logger.error(f"❌ Failed to import GeminiClient: {e}")
@@ -177,14 +171,7 @@ class SmartToolsMcpServer:
             else:
                 logger.warning("⚠️ No GOOGLE_API_KEY found in environment")
             
-            # No directory restoration needed - we never changed it
-            
-            # Add smart tools src to path for engine wrapper imports (using pathlib)
-            smart_tools_src = smart_tools_root / "src"
-            smart_tools_src_str = str(smart_tools_src)
-            if smart_tools_src_str not in sys.path:
-                sys.path.insert(0, smart_tools_src_str)
-                logger.info(f"Added {smart_tools_src_str} to sys.path")
+            # Self-contained imports - no path manipulation needed
             
             # Create engine wrappers using the factory with monkey patch
             logger.info("Importing EngineFactory...")

@@ -25,7 +25,15 @@
       "Bash(where claude)",
       "Bash(find:*)",
       "Bash(mkdir:*)",
-      "Bash(mv:*)"
+      "Bash(mv:*)",
+      "Bash(\"C:\\Users\\Admin\\miniconda3\\python.exe\" -m pip install google-generativeai)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(\"C:\\Users\\Admin\\miniconda3\\python.exe\" \"src\\smart_mcp_server.py\" --help)",
+      "Bash(cp:*)",
+      "mcp__gemini-review__review_output",
+      "Bash(\"C:\\Users\\Admin\\miniconda3\\python.exe\" \"C:\\Users\\Admin\\claude-smart-tools\\src\\smart_mcp_server.py\" --help)",
+      "Bash(git stash push:*)"
     ],
     "deny": []
   }

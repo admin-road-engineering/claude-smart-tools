@@ -1,0 +1,21 @@
+{
+  "pro": {
+    "date": "2025-08-20",
+    "count": 0,
+    "blocked_until": null
+  },
+  "flash": {
+    "date": "2025-08-20",
+    "count": 0,
+    "blocked_until": null,
+    "rpm_hits": 1,
+    "rpd_hits": 1
+  },
+  "flash-lite": {
+    "date": "2025-08-20",
+    "count": 0,
+    "blocked_until": null,
+    "rpm_hits": 1,
+    "rpd_hits": 1
+  }
+}
