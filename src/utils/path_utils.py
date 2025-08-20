@@ -1,11 +1,24 @@
 """
 Universal path normalization utilities for Smart Tools and Gemini Engines
 Resolves the WindowsPath object is not iterable error across all tools
+Enhanced with intelligent path resolution for VENV compatibility
 """
 import os
 import logging
 from pathlib import Path
 from typing import List, Union, Any
+
+# Import path resolver for intelligent context detection
+try:
+    from ..services.path_resolver import get_path_resolver
+except ImportError:
+    # Add parent directory to path for script execution
+    import sys
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_dir)
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+    from services.path_resolver import get_path_resolver
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +26,7 @@ logger = logging.getLogger(__name__)
 def normalize_paths(paths_input: Any) -> List[str]:
     """
     Universal path normalization that handles all path input types
+    Enhanced with intelligent path resolution for VENV compatibility
     
     Args:
         paths_input: Can be:
@@ -31,18 +45,87 @@ def normalize_paths(paths_input: Any) -> List[str]:
     
     # If it's already a list, process each item
     if isinstance(paths_input, (list, tuple)):
-        normalized_paths = []
-        for path_item in paths_input:
-            normalized_paths.extend(normalize_single_path(path_item))
-        return normalized_paths
+        # Use intelligent path resolution for the entire list
+        path_strings = [str(p) for p in paths_input]
+        try:
+            resolver = get_path_resolver()
+            resolved_paths, resolution_messages = resolver.resolve_file_paths(path_strings)
+            
+            # Log resolution messages
+            for message in resolution_messages:
+                if message.startswith("❌"):
+                    logger.warning(message)
+                else:
+                    logger.info(message)
+            
+            # Process resolved paths (expand directories)
+            normalized_paths = []
+            for path_obj in resolved_paths:
+                normalized_paths.extend(process_resolved_path(path_obj))
+            
+            return normalized_paths
+            
+        except Exception as e:
+            logger.error(f"Intelligent path resolution failed: {e}")
+            # Fallback to old behavior
+            normalized_paths = []
+            for path_item in paths_input:
+                normalized_paths.extend(normalize_single_path_legacy(path_item))
+            return normalized_paths
     
-    # If it's a single item, normalize it
-    return normalize_single_path(paths_input)
+    # If it's a single item, use intelligent resolution
+    try:
+        resolver = get_path_resolver()
+        resolved_paths, resolution_messages = resolver.resolve_file_paths([str(paths_input)])
+        
+        # Log resolution messages
+        for message in resolution_messages:
+            if message.startswith("❌"):
+                logger.warning(message)
+            else:
+                logger.info(message)
+        
+        if resolved_paths:
+            # Process resolved paths (expand directories)
+            normalized_paths = []
+            for path_obj in resolved_paths:
+                normalized_paths.extend(process_resolved_path(path_obj))
+            return normalized_paths
+        else:
+            # Path not found, but return it anyway for engine to handle
+            return [str(paths_input)]
+            
+    except Exception as e:
+        logger.error(f"Intelligent path resolution failed: {e}")
+        # Fallback to old behavior
+        return normalize_single_path_legacy(paths_input)
 
 
-def normalize_single_path(path_input: Any) -> List[str]:
+def process_resolved_path(path_obj: Path) -> List[str]:
     """
-    Normalize a single path input (string or Path object) to a list of string paths
+    Process a resolved Path object (expand directories, return files)
+    
+    Args:
+        path_obj: Resolved Path object
+        
+    Returns:
+        List of string file paths
+    """
+    # If it's a file, return it as a single-item list
+    if path_obj.is_file():
+        return [str(path_obj)]
+    
+    # If it's a directory, find all relevant files
+    if path_obj.is_dir():
+        return get_files_from_directory(path_obj)
+    
+    # For any other path type, return as string
+    return [str(path_obj)]
+
+
+def normalize_single_path_legacy(path_input: Any) -> List[str]:
+    """
+    Legacy path normalization (fallback when intelligent resolution fails)
     
     Args:
         path_input: Single path as string, Path object, or other type
@@ -60,11 +143,10 @@ def normalize_single_path(path_input: Any) -> List[str]:
         logger.warning(f"Unknown path type {type(path_input)}, treating as string: {path_input}")
         return [str(path_input)]
     
-    # CRITICAL FIX: Convert to absolute path to handle working directory changes
-    # This ensures paths remain valid even when engines change working directory
+    # LEGACY: Convert to absolute path based on MCP server directory
     try:
         path_obj = path_obj.resolve()
-        logger.debug(f"Resolved path to absolute: {path_obj}")
+        logger.debug(f"Legacy: Resolved path to absolute: {path_obj}")
     except Exception as e:
         logger.warning(f"Could not resolve path {path_obj}: {e}")
         # Continue with original path
@@ -74,16 +156,22 @@ def normalize_single_path(path_input: Any) -> List[str]:
         logger.warning(f"Path does not exist: {path_obj}")
         return [str(path_obj)]  # Return as-is, let engine handle the error
     
-    # If it's a file, return it as a single-item list
-    if path_obj.is_file():
-        return [str(path_obj)]
+    return process_resolved_path(path_obj)
+
+
+def normalize_single_path(path_input: Any) -> List[str]:
+    """
+    Normalize a single path input - wrapper for backward compatibility
+    Now uses intelligent resolution via normalize_paths function
     
-    # If it's a directory, find all relevant files
-    if path_obj.is_dir():
-        return get_files_from_directory(path_obj)
-    
-    # For any other path type, return as string
-    return [str(path_obj)]
+    Args:
+        path_input: Single path as string, Path object, or other type
+        
+    Returns:
+        List of string paths (single file = 1-item list, directory = multiple files)
+    """
+    # Use the main normalize_paths function for consistency
+    return normalize_paths(path_input)
 
 
 def get_files_from_directory(directory_path: Path) -> List[str]:

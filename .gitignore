@@ -27,3 +27,12 @@ gemini-engines/
 # Logs
 logs/
 *.log
+
+# Test and diagnostic files
+diagnostic_report.json
+diagnostic_tool.py
+test_solution_validation.py
+test_venv_file_resolution.py
+
+# Local Claude settings
+.claude/settings.local.json

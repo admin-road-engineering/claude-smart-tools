@@ -22,14 +22,25 @@ def setup_venv_environment():
     script_path = os.path.abspath(__file__)
     project_root = os.path.dirname(script_path)
     
+    logger.info("=== COMPREHENSIVE VENV DIAGNOSTIC INFORMATION ===")
     logger.info(f"Script location: {script_path}")
     logger.info(f"Project root: {project_root}")
     logger.info(f"Current working directory: {os.getcwd()}")
+    logger.info(f"Python executable: {sys.executable}")
+    logger.info(f"Python version: {sys.version}")
+    logger.info(f"Current sys.path (first 5 entries): {sys.path[:5]}")
+    
+    # Log environment variables that might affect path resolution
+    important_env_vars = ['PYTHONPATH', 'PATH', 'VIRTUAL_ENV', 'CONDA_DEFAULT_ENV']
+    for var in important_env_vars:
+        value = os.environ.get(var, 'NOT SET')
+        logger.info(f"Environment {var}: {value}")
     
     # CRITICAL: Change to project root
     if os.getcwd() != project_root:
         os.chdir(project_root)
         logger.info(f"Changed working directory to: {project_root}")
+        logger.info(f"Verified new working directory: {os.getcwd()}")
     
     # CRITICAL: Add project paths to sys.path
     paths_to_add = [
@@ -38,10 +49,42 @@ def setup_venv_environment():
         os.path.join(project_root, "gemini-engines"),  # Gemini engines
     ]
     
+    logger.info("=== PATH SETUP DIAGNOSTIC ===")
     for path in paths_to_add:
-        if os.path.exists(path) and path not in sys.path:
-            sys.path.insert(0, path)
-            logger.info(f"Added to Python path: {path}")
+        abs_path = os.path.abspath(path)
+        exists = os.path.exists(abs_path)
+        in_path = abs_path in sys.path
+        logger.info(f"Path: {abs_path}")
+        logger.info(f"  Exists: {exists}")
+        logger.info(f"  In sys.path: {in_path}")
+        
+        if exists and not in_path:
+            sys.path.insert(0, abs_path)
+            logger.info(f"  ✅ Added to Python path: {abs_path}")
+        elif not exists:
+            logger.error(f"  ❌ Path does not exist: {abs_path}")
+    
+    # Verify critical paths exist and log contents
+    verification_paths = {
+        'project_root': project_root,
+        'src': os.path.join(project_root, "src"),
+        'gemini-engines': os.path.join(project_root, "gemini-engines"),
+        'src/smart_tools': os.path.join(project_root, "src", "smart_tools"),
+        'src/engines': os.path.join(project_root, "src", "engines")
+    }
+    
+    logger.info("=== PATH VERIFICATION DIAGNOSTIC ===")
+    for name, path in verification_paths.items():
+        abs_path = os.path.abspath(path)
+        exists = os.path.exists(abs_path)
+        logger.info(f"{name}: {abs_path} - {'EXISTS' if exists else 'NOT FOUND'}")
+        
+        if exists and os.path.isdir(abs_path):
+            try:
+                contents = os.listdir(abs_path)[:10]  # First 10 items
+                logger.info(f"  Contents (first 10): {contents}")
+            except Exception as e:
+                logger.error(f"  Error listing contents: {e}")
     
     # Verify critical paths exist
     gemini_engines_path = os.path.join(project_root, "gemini-engines")
@@ -55,6 +98,7 @@ def setup_venv_environment():
         raise FileNotFoundError(f"src directory not found: {src_path}")
         
     logger.info("✅ VENV environment setup complete")
+    logger.info("=== END DIAGNOSTIC INFORMATION ===")
 
 async def main():
     """Main entry point"""
