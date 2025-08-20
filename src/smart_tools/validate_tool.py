@@ -302,9 +302,14 @@ class ValidateTool(BaseSmartTool):
                     original_request=original_request
                 )
             
-            # Determine overall success (no critical issues)
+            # Determine overall success (no critical issues AND validation actually performed)
             critical_issues = [issue for issue in filtered_issues if issue.get('severity') == 'high']
-            validation_success = len(critical_issues) == 0
+            has_valid_results = any(key in validation_results for key in [
+                'quality', 'security_config', 'consistency', 'performance', 
+                'api_contracts', 'database', 'test_coverage', 'dependencies', 'architecture'
+            ])
+            # Success only if: validation was performed AND no critical issues found
+            validation_success = has_valid_results and len(critical_issues) == 0
             
             # Extract correlation summary for result
             correlations = None
@@ -535,7 +540,34 @@ class ValidateTool(BaseSmartTool):
             ])
         
         # Add validation conclusions
-        if issues_by_severity['high'] > 0:
+        # Check if any actual validation was performed
+        has_valid_results = any(key in validation_results for key in [
+            'quality', 'security_config', 'consistency', 'performance', 
+            'api_contracts', 'database', 'test_coverage', 'dependencies', 'architecture'
+        ])
+        
+        if not has_valid_results and execution_errors:
+            # No successful validation due to errors
+            report_sections.extend([
+                "## ❌ Validation Failed",
+                "No validation could be performed due to engine failures.",
+                f"**Errors encountered**: {len(execution_errors)}",
+                "**Recommendation**: Check file paths and ensure files are accessible.",
+                ""
+            ])
+        elif not has_valid_results:
+            # No validation results but no errors either - likely no files found
+            report_sections.extend([
+                "## ⚠️ No Files Analyzed",
+                "No files were found or could be accessed for validation.",
+                "**Possible causes**:",
+                "- Incorrect file paths provided",
+                "- Files do not exist at specified locations",
+                "- Permission issues accessing files",
+                "**Recommendation**: Verify file paths and try again.",
+                ""
+            ])
+        elif issues_by_severity['high'] > 0:
             report_sections.extend([
                 "## ⚠️ Critical Issues Detected",
                 f"Found {issues_by_severity['high']} critical issues that require immediate attention.",
@@ -553,6 +585,7 @@ class ValidateTool(BaseSmartTool):
             report_sections.extend([
                 "## ✅ Validation Passed",
                 "No critical or moderate issues detected in the specified scope.",
+                f"**Files analyzed**: Successfully validated {len(validation_results)} aspects",
                 "**Recommendation**: Continue with current quality standards.",
                 ""
             ])

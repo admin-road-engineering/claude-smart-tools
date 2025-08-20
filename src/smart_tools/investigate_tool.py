@@ -28,6 +28,7 @@ class InvestigateTool(BaseSmartTool):
         # Configure execution mode - parallel by default, sequential as fallback
         self._execution_mode = os.environ.get('INVESTIGATE_EXECUTION_MODE', 'parallel').lower()
         self._sequential_fallback = os.environ.get('INVESTIGATE_SEQUENTIAL_FALLBACK', 'true').lower() == 'true'
+        self._memory_fallback_threshold = float(os.environ.get('INVESTIGATE_MEMORY_FALLBACK_THRESHOLD', '85'))
     
     def get_routing_strategy(self, files: List[str], problem: str, **kwargs) -> Dict[str, Any]:
         """
@@ -113,14 +114,14 @@ class InvestigateTool(BaseSmartTool):
             
             # Memory safeguard: Check available memory before parallel execution
             memory = await asyncio.to_thread(psutil.virtual_memory)
-            if memory.percent > 85:
+            if memory.percent > self._memory_fallback_threshold:
                 logger.warning(f"High memory usage detected: {memory.percent}%. Using reduced parallelism.")
                 max_parallel = 2
             else:
                 max_parallel = 5
             
             # Execution mode selection: parallel (default) or sequential (fallback)
-            if self._execution_mode == 'sequential' or (memory.percent > 90 and self._sequential_fallback):
+            if self._execution_mode == 'sequential' or (memory.percent > self._memory_fallback_threshold and self._sequential_fallback):
                 logger.info(f"Using sequential execution mode (memory: {memory.percent}%)")
                 analysis_results = await self._execute_sequential_investigation(files, problem, **kwargs)
                 routing_strategy = self.get_routing_strategy(files=files, problem=problem, **kwargs)

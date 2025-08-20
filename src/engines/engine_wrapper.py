@@ -92,6 +92,25 @@ class EngineWrapper:
         """Helper method to execute the engine with proper directory context"""
         import os
         
+        # Log current state for debugging file access issues
+        original_cwd = os.getcwd()
+        logger.debug(f"Engine {self.engine_name} execution context:")
+        logger.debug(f"  Current working directory: {original_cwd}")
+        logger.debug(f"  Changing to: {gemini_engines_path}")
+        
+        # Log path parameters to help debug file access issues
+        for param in ['paths', 'files', 'file_paths', 'source_paths']:
+            if param in adapted_kwargs:
+                paths = adapted_kwargs[param]
+                if paths:
+                    logger.debug(f"  {param}: {len(paths)} paths provided")
+                    logger.debug(f"    First path: {paths[0] if paths else 'None'}")
+                    # Check if first path exists
+                    if paths and os.path.exists(paths[0]):
+                        logger.debug(f"    First path exists: ✓")
+                    else:
+                        logger.warning(f"    First path does NOT exist: {paths[0] if paths else 'None'}")
+        
         # Change to local gemini engines directory for execution context
         # This ensures the original tools run with proper config context
         os.chdir(gemini_engines_path)
@@ -108,6 +127,7 @@ class EngineWrapper:
         """
         Pre-process all potential path inputs to ensure they are lists
         This is the critical fix for WindowsPath iteration errors
+        IMPORTANT: Converts to absolute paths since we change working directory
         """
         processed = kwargs.copy()
         
@@ -122,10 +142,10 @@ class EngineWrapper:
                 original_value = processed[param]
                 logger.info(f"PREPROCESSING: {param} = {type(original_value)} : {original_value}")
                 
-                # Use centralized path normalization
+                # Use centralized path normalization - this returns ABSOLUTE paths
                 normalized_paths = normalize_paths(original_value)
                 processed[param] = normalized_paths
-                logger.info(f"PREPROCESSING: Normalized {param} using centralized path utils: {len(normalized_paths)} paths")
+                logger.info(f"PREPROCESSING: Normalized {param} to absolute paths: {len(normalized_paths)} paths")
         
         return processed
     

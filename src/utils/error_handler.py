@@ -160,8 +160,9 @@ class ErrorHandler:
     def _determine_severity(self, category: ErrorCategory, error_msg: str, exception: Exception) -> ErrorSeverity:
         """Determine error severity based on category and context"""
         
-        # Critical patterns regardless of category
-        if any(pattern in error_msg for pattern in ["critical", "fatal", "emergency", "panic"]):
+        # Critical patterns regardless of category (case-insensitive)
+        critical_patterns = ["critical", "fatal", "emergency", "panic"]
+        if any(pattern in error_msg.lower() for pattern in critical_patterns):
             return ErrorSeverity.CRITICAL
         
         # Category-specific severity mapping
