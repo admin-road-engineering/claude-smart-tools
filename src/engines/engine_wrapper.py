@@ -104,12 +104,6 @@ class EngineWrapper:
         
         return result
     
-    def _normalize_paths(self, paths_input):
-        """
-        Normalize path inputs using centralized path utilities
-        """
-        return normalize_paths(paths_input)
-    
     def _preprocess_path_inputs(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
         """
         Pre-process all potential path inputs to ensure they are lists
@@ -128,19 +122,10 @@ class EngineWrapper:
                 original_value = processed[param]
                 logger.info(f"PREPROCESSING: {param} = {type(original_value)} : {original_value}")
                 
-                # Convert single path objects to lists
-                if isinstance(original_value, (str, Path)) or hasattr(original_value, '__fspath__'):
-                    # Single path - convert to list
-                    processed[param] = [str(original_value)]
-                    logger.info(f"PREPROCESSING: Converted single {type(original_value)} to list")
-                elif isinstance(original_value, (list, tuple)):
-                    # Already a list/tuple - convert all items to strings
-                    processed[param] = [str(item) for item in original_value]
-                    logger.info(f"PREPROCESSING: Converted {len(original_value)} items to string list")
-                else:
-                    # Unknown type - convert to string and wrap in list
-                    processed[param] = [str(original_value)]
-                    logger.warning(f"PREPROCESSING: Unknown type {type(original_value)}, converted to string list")
+                # Use centralized path normalization
+                normalized_paths = normalize_paths(original_value)
+                processed[param] = normalized_paths
+                logger.info(f"PREPROCESSING: Normalized {param} using centralized path utils: {len(normalized_paths)} paths")
         
         return processed
     
@@ -166,7 +151,7 @@ class EngineWrapper:
                 # Apply path normalization for path-related parameters
                 if smart_param in ['files', 'file_paths'] and engine_param == 'paths':
                     logger.info(f"ENGINE WRAPPER: Normalizing {smart_param} -> {engine_param}, input type={type(value)}, value={value}")
-                    normalized_value = self._normalize_paths(value)
+                    normalized_value = normalize_paths(value)
                     logger.info(f"ENGINE WRAPPER: Normalized to {len(normalized_value)} paths: {normalized_value[:3]}...")
                     adapted[engine_param] = normalized_value
                 else:
@@ -176,7 +161,7 @@ class EngineWrapper:
         path_related_params = ['paths', 'source_paths', 'config_paths', 'spec_paths', 'log_paths', 'schema_paths', 'project_paths']
         for param in path_related_params:
             if param in adapted:
-                adapted[param] = self._normalize_paths(adapted[param])
+                adapted[param] = normalize_paths(adapted[param])
         
         # Engine-specific adaptations
         if self.engine_name == 'analyze_code':

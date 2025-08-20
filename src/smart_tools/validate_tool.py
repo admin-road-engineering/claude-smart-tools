@@ -160,7 +160,7 @@ class ValidateTool(BaseSmartTool):
                 logger.info(f"Using project-specific CLAUDE.md for validation ({len(project_context['claude_md_content'])} chars)")
             
             # Memory safeguard: Check available memory before parallel execution
-            memory = psutil.virtual_memory()
+            memory = await asyncio.to_thread(psutil.virtual_memory)
             if memory.percent > 85:
                 logger.warning(f"High memory usage detected: {memory.percent}%. Using reduced parallelism.")
                 max_parallel = 2  # Reduce parallel tasks when memory is constrained

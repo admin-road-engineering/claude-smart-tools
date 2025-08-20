@@ -4,6 +4,7 @@ Base class for smart tools that route to multiple engines with CPU throttling
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
+import asyncio
 import logging
 import sys
 import os
@@ -12,6 +13,8 @@ import os
 try:
     from ..services.cpu_throttler import get_cpu_throttler
     from ..utils.project_context import get_project_context_reader
+    from ..utils.path_utils import normalize_paths
+    from ..utils.error_handler import handle_smart_tool_error
 except ImportError:
     # Add parent directory to path for script execution
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -20,6 +23,8 @@ except ImportError:
         sys.path.insert(0, parent_dir)
     from services.cpu_throttler import get_cpu_throttler
     from utils.project_context import get_project_context_reader
+    from utils.path_utils import normalize_paths
+    from utils.error_handler import handle_smart_tool_error
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +71,11 @@ class BaseSmartTool(ABC):
         # Initialize project context reader
         self.context_reader = get_project_context_reader()
         self._project_context_cache = {}  # Cache project context per execution
+        
+        # Configure retry behavior
+        self._max_retries = int(os.environ.get('ENGINE_MAX_RETRIES', '3'))
+        self._base_retry_delay = float(os.environ.get('ENGINE_BASE_RETRY_DELAY', '1.0'))
+        self._max_retry_delay = float(os.environ.get('ENGINE_MAX_RETRY_DELAY', '30.0'))
         
         if self.cpu_throttler:
             logger.debug(f"Smart tool {self.tool_name} initialized with CPU throttling, file caching, and project context awareness")
@@ -118,13 +128,10 @@ class BaseSmartTool(ABC):
         for param in path_params:
             if param in normalized_kwargs:
                 value = normalized_kwargs[param]
-                # Convert WindowsPath or single paths to list of strings
-                if isinstance(value, (str, Path)) or hasattr(value, '__fspath__'):
-                    normalized_kwargs[param] = [str(value)]
-                    logger.debug(f"Normalized single {type(value).__name__} to list for {param}")
-                elif isinstance(value, (list, tuple)):
-                    normalized_kwargs[param] = [str(item) for item in value]
-                    logger.debug(f"Normalized {len(value)} paths to strings for {param}")
+                # Use centralized path normalization
+                normalized_paths = normalize_paths(value)
+                normalized_kwargs[param] = normalized_paths
+                logger.debug(f"Normalized {param} using centralized path utils: {len(normalized_paths)} paths")
         
         # Pre-populate file content cache if enabled
         if self._cache_enabled and any(param in normalized_kwargs for param in path_params):
@@ -134,29 +141,16 @@ class BaseSmartTool(ABC):
         
         try:
             engine = self.engines[engine_name]
-            if hasattr(engine, 'execute'):
-                result = await engine.execute(**normalized_kwargs)
-            else:
-                # Direct function call
-                result = await engine(**normalized_kwargs)
+            result = await self._execute_engine_with_retry(engine, engine_name, normalized_kwargs)
             return result
         except Exception as e:
-            error_msg = str(e)
-            
-            # Improve rate limiting error messages
-            if "rate limited" in error_msg.lower() or "exhausted" in error_msg.lower():
-                return f"⚠️ Rate limit reached. The Gemini API has usage limits. Please try again in a few minutes."
-            
-            # Improve file not found messages
-            if "no files found" in error_msg.lower() or "no code files" in error_msg.lower():
-                return f"📁 No valid files found. Please check the file paths."
-            
-            # API key issues
-            if "api key" in error_msg.lower():
-                return f"🔑 API key issue detected. Please check your Gemini API configuration."
-            
-            # General error with more context
-            return f"Error in {engine_name}: {error_msg[:200]}..."
+            # Use standardized error handling
+            context = {
+                'operation': 'engine_execution',
+                'engine_name': engine_name,
+                'kwargs_keys': list(normalized_kwargs.keys()) if normalized_kwargs else []
+            }
+            return handle_smart_tool_error(e, context, engine_name)
         finally:
             # CPU yield after engine operation
             if self.cpu_throttler:
@@ -179,6 +173,58 @@ class BaseSmartTool(ABC):
         
         return results
     
+    async def _execute_engine_with_retry(self, engine: Any, engine_name: str, kwargs: Dict[str, Any]) -> Any:
+        """
+        Execute engine with exponential backoff retry logic for rate limiting and transient errors
+        Uses configurable retry parameters from environment variables
+        """
+        import time
+        import random
+        
+        max_retries = self._max_retries
+        
+        for attempt in range(max_retries + 1):
+            try:
+                # Execute the engine
+                if hasattr(engine, 'execute'):
+                    result = await engine.execute(**kwargs)
+                else:
+                    # Direct function call
+                    result = await engine(**kwargs)
+                    
+                # Success - return result
+                if attempt > 0:
+                    logger.info(f"Engine {engine_name} succeeded on retry attempt {attempt + 1}")
+                return result
+                
+            except Exception as e:
+                error_msg = str(e).lower()
+                
+                # Check if this is a retryable error
+                is_rate_limit = "rate limited" in error_msg or "exhausted" in error_msg or "quota" in error_msg
+                is_transient = "timeout" in error_msg or "connection" in error_msg or "network" in error_msg
+                is_server_error = "500" in error_msg or "502" in error_msg or "503" in error_msg or "504" in error_msg
+                
+                if (is_rate_limit or is_transient or is_server_error) and attempt < max_retries:
+                    # Calculate exponential backoff with jitter
+                    base_delay = self._base_retry_delay * (2 ** attempt)  # 1, 2, 4, 8 seconds by default
+                    jitter = random.uniform(0.1, 0.5)  # Add randomness to avoid thundering herd
+                    delay = min(base_delay + jitter, self._max_retry_delay)  # Cap at max delay
+                    
+                    error_type = "rate limit" if is_rate_limit else ("server error" if is_server_error else "transient")
+                    logger.warning(f"Engine {engine_name} failed on attempt {attempt + 1}/{max_retries + 1} "
+                                 f"with {error_type} error. Retrying in {delay:.1f} seconds...")
+                    
+                    # Wait before retry
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    # Not retryable or max retries exceeded
+                    if attempt == max_retries and (is_rate_limit or is_transient or is_server_error):
+                        logger.error(f"Engine {engine_name} failed after {max_retries + 1} attempts. "
+                                   f"Final error: {str(e)}")
+                    raise e
+    
     async def analyze_correlations(self, engine_results: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Analyze correlations between multiple engine results (non-blocking)"""
         if not self.enable_correlation or len(engine_results) < 2:
@@ -191,7 +237,6 @@ class BaseSmartTool(ABC):
                 self._correlation_framework = CorrelationFramework()
             
             # Run correlation analysis in executor to avoid blocking
-            import asyncio
             from concurrent.futures import ThreadPoolExecutor
             
             # Use a thread pool for CPU-bound correlation analysis

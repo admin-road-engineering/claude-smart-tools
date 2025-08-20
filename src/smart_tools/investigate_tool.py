@@ -5,6 +5,7 @@ Routes to search_code + check_quality + analyze_logs + performance_profiler base
 from typing import List, Dict, Any, Optional
 import asyncio
 import logging
+import os
 import psutil  # For memory monitoring
 from .base_smart_tool import BaseSmartTool, SmartToolResult
 from .executive_synthesizer import ExecutiveSynthesizer
@@ -16,11 +17,17 @@ class InvestigateTool(BaseSmartTool):
     """
     Smart tool for investigating and debugging problems in code
     Intelligently routes to multiple engines based on problem characteristics
+    
+    Supports both parallel and sequential execution modes for different scenarios
     """
     
     def __init__(self, engines: Dict[str, Any]):
         super().__init__(engines)
         self.executive_synthesizer = ExecutiveSynthesizer(engines)
+        
+        # Configure execution mode - parallel by default, sequential as fallback
+        self._execution_mode = os.environ.get('INVESTIGATE_EXECUTION_MODE', 'parallel').lower()
+        self._sequential_fallback = os.environ.get('INVESTIGATE_SEQUENTIAL_FALLBACK', 'true').lower() == 'true'
     
     def get_routing_strategy(self, files: List[str], problem: str, **kwargs) -> Dict[str, Any]:
         """
@@ -105,23 +112,45 @@ class InvestigateTool(BaseSmartTool):
                 logger.info(f"Using project-specific CLAUDE.md for investigation ({len(project_context['claude_md_content'])} chars)")
             
             # Memory safeguard: Check available memory before parallel execution
-            memory = psutil.virtual_memory()
+            memory = await asyncio.to_thread(psutil.virtual_memory)
             if memory.percent > 85:
                 logger.warning(f"High memory usage detected: {memory.percent}%. Using reduced parallelism.")
                 max_parallel = 2
             else:
                 max_parallel = 5
             
-            # Track execution errors
-            execution_errors = []
+            # Execution mode selection: parallel (default) or sequential (fallback)
+            if self._execution_mode == 'sequential' or (memory.percent > 90 and self._sequential_fallback):
+                logger.info(f"Using sequential execution mode (memory: {memory.percent}%)")
+                analysis_results = await self._execute_sequential_investigation(files, problem, **kwargs)
+                routing_strategy = self.get_routing_strategy(files=files, problem=problem, **kwargs)
+                engines_used = routing_strategy['engines']
+                problem_type = routing_strategy.get('problem_type', 'general')
+                execution_errors = []
+                
+                # Check for errors in sequential results
+                if 'error' in analysis_results:
+                    execution_errors.append(analysis_results['error'])
+                
+                # Skip parallel execution and go directly to synthesis
+                performance_mode = "sequential"
+            else:
+                # Continue with parallel execution (original behavior)
+                performance_mode = "parallel"
             
-            routing_strategy = self.get_routing_strategy(files=files, problem=problem, **kwargs)
-            engines_used = routing_strategy['engines']
-            problem_type = routing_strategy['problem_type']
+            # Track execution errors (initialize for parallel mode)
+            if performance_mode == "parallel":
+                execution_errors = []
             
-            analysis_results = {}
-            search_keywords = self._extract_search_keywords(problem)
-            quality_focus = self._map_problem_to_quality_focus(problem_type)
+            # Only run parallel execution if not already done in sequential mode
+            if performance_mode == "parallel":
+                routing_strategy = self.get_routing_strategy(files=files, problem=problem, **kwargs)
+                engines_used = routing_strategy['engines']
+                problem_type = routing_strategy['problem_type']
+                
+                analysis_results = {}
+                search_keywords = self._extract_search_keywords(problem)
+                quality_focus = self._map_problem_to_quality_focus(problem_type)
             
             # Group engines into parallel batches
             # Batch 1: Independent analysis engines
@@ -190,6 +219,8 @@ class InvestigateTool(BaseSmartTool):
                     elif isinstance(result, dict):
                         analysis_results.update(result)
             
+            # End of parallel execution block
+            
             # Synthesize investigation results with error reporting
             investigation_report = self._synthesize_investigation(
                 problem, problem_type, analysis_results, routing_strategy, execution_errors
@@ -224,7 +255,7 @@ class InvestigateTool(BaseSmartTool):
                     "problem_type": problem_type,
                     "focus": focus,
                     "phases_completed": len(analysis_results),
-                    "performance_mode": "parallel",
+                    "performance_mode": performance_mode,
                     "parallel_batches": 2,
                     "max_parallel_tasks": max_parallel,
                     "memory_usage_percent": memory.percent,
@@ -242,6 +273,92 @@ class InvestigateTool(BaseSmartTool):
                 routing_decision=routing_strategy['explanation'] if 'routing_strategy' in locals() else "Failed during routing",
                 metadata={"error": str(e)}
             )
+    
+    async def _execute_sequential_investigation(self, files: List[str], problem: str, **kwargs) -> Dict[str, Any]:
+        """
+        Sequential execution mode for investigation - more reliable but slower
+        Based on patterns from investigate_tool_backup.py
+        """
+        try:
+            routing_strategy = self.get_routing_strategy(files=files, problem=problem, **kwargs)
+            engines_used = routing_strategy['engines']
+            problem_lower = problem.lower()
+            
+            analysis_results = {}
+            logger.info(f"Sequential investigation mode: using {len(engines_used)} engines")
+            
+            # Phase 1: Code Search - Find relevant areas first
+            if 'search_code' in engines_used:
+                search_keywords = self._extract_search_keywords(problem)
+                search_result = await self.execute_engine(
+                    'search_code', 
+                    query=search_keywords,
+                    paths=files,
+                    context_question=f"Find code related to: {problem}",
+                    output_format="text"
+                )
+                analysis_results['code_search'] = search_result
+            
+            # Phase 2: Specialized analysis based on problem type
+            # Performance problems
+            if any(keyword in problem_lower for keyword in ['slow', 'performance', 'timeout']) and 'performance_profiler' in engines_used:
+                perf_result = await self.execute_engine(
+                    'performance_profiler',
+                    target_operation=problem
+                )
+                analysis_results['performance'] = perf_result
+            
+            # Error/crash problems
+            elif any(keyword in problem_lower for keyword in ['error', 'exception', 'crash']) and 'analyze_logs' in engines_used:
+                log_result = await self.execute_engine(
+                    'analyze_logs',
+                    log_paths=files,
+                    focus="errors"
+                )
+                analysis_results['logs'] = log_result
+            
+            # Security problems
+            elif any(keyword in problem_lower for keyword in ['security', 'vulnerability']) and 'config_validator' in engines_used:
+                config_result = await self.execute_engine(
+                    'config_validator',
+                    config_paths=files,
+                    validation_type="security"
+                )
+                analysis_results['security_config'] = config_result
+            
+            # Phase 3: Quality analysis - always valuable
+            if 'check_quality' in engines_used:
+                quality_result = await self.execute_engine(
+                    'check_quality',
+                    paths=files,
+                    check_type="all",
+                    verbose=True
+                )
+                analysis_results['quality'] = quality_result
+            
+            # Phase 4: Architecture analysis if needed
+            if 'analyze_code' in engines_used:
+                code_result = await self.execute_engine(
+                    'analyze_code',
+                    paths=files,
+                    analysis_type="refactor_prep",
+                    question=f"What might be causing: {problem}"
+                )
+                analysis_results['architecture'] = code_result
+            
+            return analysis_results
+            
+        except Exception as e:
+            logger.error(f"Sequential investigation failed: {e}")
+            return {'error': f"Sequential investigation failed: {str(e)}"}
+    
+    def _extract_search_keywords(self, problem: str) -> str:
+        """Extract relevant search keywords from the problem description"""
+        # Remove common words and focus on technical terms
+        common_words = {'the', 'is', 'are', 'was', 'were', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'cannot', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
+        words = problem.lower().split()
+        keywords = [word for word in words if word not in common_words and len(word) > 2]
+        return ' '.join(keywords[:5])  # Use top 5 keywords
     
     # Parallel execution helper methods
     async def _run_code_search(self, files: List[str], keywords: str, problem: str) -> Dict[str, Any]:

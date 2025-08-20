@@ -1,6 +1,15 @@
 """
-Investigate Tool - Smart tool for debugging issues, finding root causes, and tracing problems
-Routes to search_code + check_quality + analyze_logs + performance_profiler based on problem type
+REFERENCE IMPLEMENTATION: Sequential Investigate Tool
+
+This file serves as a reference implementation for sequential execution patterns.
+The main investigate_tool.py now supports both parallel and sequential modes.
+
+This file is kept for:
+- Reference for sequential execution patterns
+- Fallback implementation if needed
+- Comparison during testing and validation
+
+DO NOT USE THIS FILE DIRECTLY - use investigate_tool.py with INVESTIGATE_EXECUTION_MODE=sequential
 """
 from typing import List, Dict, Any, Optional
 import asyncio
