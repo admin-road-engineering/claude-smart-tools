@@ -39,7 +39,9 @@
       "Bash(if [ -n \"$GOOGLE_API_KEY\" ])",
       "Bash(then echo \"GOOGLE_API_KEY is set\")",
       "Bash(else echo \"GOOGLE_API_KEY is NOT set\")",
-      "Bash(fi)"
+      "Bash(fi)",
+      "Bash(timeout:*)",
+      "Bash(true)"
     ],
     "deny": []
   }

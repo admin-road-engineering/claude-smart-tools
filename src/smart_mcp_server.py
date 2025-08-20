@@ -127,10 +127,20 @@ class SmartToolsMcpServer:
             # Import from local gemini-engines directory
             logger.info("Attempting imports from local gemini-engines...")
             
-            # Add gemini-engines to path for imports
+            # Add gemini-engines to path for imports (VENV-safe path resolution)
             current_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(current_dir)
+            
+            # VENV-safe fallback: if gemini-engines not found, try from current working directory
             gemini_engines_path = os.path.join(project_root, "gemini-engines")
+            if not os.path.exists(gemini_engines_path):
+                # Fallback for VENV: try from current working directory
+                fallback_path = os.path.join(os.getcwd(), "gemini-engines")
+                if os.path.exists(fallback_path):
+                    gemini_engines_path = fallback_path
+                    logger.info(f"Using VENV fallback path for gemini-engines: {fallback_path}")
+                else:
+                    logger.warning(f"gemini-engines not found in either location: {gemini_engines_path} or {fallback_path}")
             
             if os.path.exists(gemini_engines_path):
                 if gemini_engines_path not in sys.path:
