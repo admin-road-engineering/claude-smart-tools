@@ -59,19 +59,42 @@ def test_requirements_cleanup():
         print(f"❌ requirements.txt validation failed: {e}")
         return False
 
+def test_main_requirements():
+    """Test that main project requirements.txt is updated"""
+    try:
+        req_path = os.path.join(os.path.dirname(__file__), 'requirements.txt')
+        with open(req_path, 'r') as f:
+            content = f.read()
+        
+        # Check that google-generativeai is updated
+        assert 'google-generativeai>=0.8.0' in content, "Main project google-generativeai version not updated"
+        
+        # Check that Smart Tools dependencies are present
+        assert 'psutil>=5.9.0' in content, "psutil dependency missing for CPU throttling"
+        assert 'requests>=2.31.0' in content, "requests dependency missing"
+        
+        print("✅ Main project requirements.txt validated")
+        return True
+    except Exception as e:
+        print(f"❌ Main project requirements.txt validation failed: {e}")
+        return False
+
 if __name__ == "__main__":
     print("🔧 Testing dependency fixes...")
     
     setup_ok = test_setup_parsing()
     req_ok = test_requirements_cleanup()
+    main_req_ok = test_main_requirements()
     
-    if setup_ok and req_ok:
+    if setup_ok and req_ok and main_req_ok:
         print("\n🎉 All dependency fixes validated successfully!")
         print("✅ Version updated to 1.2.0-beta.1")
         print("✅ Status downgraded to Beta")  
         print("✅ Dependencies harmonized between setup.py and requirements.txt")
+        print("✅ Main project requirements.txt updated")
         print("✅ Legacy packages removed")
         print("✅ Development dependencies moved to extras_require")
+        print("✅ Smart Tools runtime dependencies added")
     else:
         print("\n❌ Some validation checks failed")
         sys.exit(1)

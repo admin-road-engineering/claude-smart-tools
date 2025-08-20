@@ -1,17 +1,19 @@
-# Core dependencies
+# Core dependencies for Smart Tools
 mcp>=1.0.0
 pydantic>=2.0.0
-google-generativeai>=0.3.0
+google-generativeai>=0.8.0
 
-# Data processing
-aiofiles>=23.0.0
-pathspec>=0.11.0
-jinja2>=3.1.0
+# Smart Tools runtime dependencies
+aiofiles>=23.0.0       # Async file operations
+pathspec>=0.11.0       # .gitignore pattern matching  
+psutil>=5.9.0          # CPU/memory monitoring for throttling
+requests>=2.31.0       # Web content fetching
+
+# Data processing and utilities
+jinja2>=3.1.0          # Template processing
+structlog>=23.0.0      # Structured logging
+python-dotenv>=1.0.0   # Environment variable loading
 
 # Development dependencies
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
-
-# Logging and utilities  
-structlog>=23.0.0
-python-dotenv>=1.0.0
