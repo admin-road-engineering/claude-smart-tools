@@ -106,8 +106,10 @@ class BaseSmartTool(ABC):
         normalized_kwargs = kwargs.copy()
         
         # Add project context to kwargs if we have files/paths
+        # Only add for engines that support it (currently only review_output)
+        engines_supporting_context = ['review_output']
         files_for_context = self._extract_files_from_kwargs(normalized_kwargs, path_params)
-        if files_for_context:
+        if files_for_context and engine_name in engines_supporting_context:
             project_context = await self._get_project_context(files_for_context)
             if project_context and project_context.get('context_files_found'):
                 # Add formatted context to kwargs for engines that can use it
