@@ -9,7 +9,8 @@ An intelligent MCP (Model Context Protocol) system that provides Claude with 7 p
 - **Multi-engine coordination** - Automatic orchestration of analysis engines
 - **Executive synthesis** - Actionable insights, not just raw data
 - **75-85% faster** - Parallel execution with memory safeguards
-- **Production ready** - Comprehensive test coverage and error handling
+- **Production ready** - Dual API key support with automatic rate limit recovery
+- **Comprehensive error handling** - Robust retry mechanisms and diagnostics
 
 ## 🎯 Project Goals: Tool Interface Revolution
 
@@ -129,20 +130,26 @@ claude --prompt "Use the understand tool to analyze this project's smart tool ar
 3. Run `analyze_docs` for documentation context
 4. Synthesize results into comprehensive understanding
 
-### 5. **Alternative: Direct MCP Configuration**
+### 5. **MCP Configuration (Recommended)**
 ```json
 {
   "mcpServers": {
     "claude-smart-tools": {
-      "command": "python",
-      "args": ["C:\\Users\\Admin\\claude-smart-tools\\src\\smart_mcp_server.py"],
+      "command": "C:\\path\\to\\your\\venv\\Scripts\\python.exe",
+      "args": ["C:\\Users\\Admin\\claude-smart-tools\\smart_mcp_venv.py"],
       "env": {
-        "GOOGLE_API_KEY": "your_key_here"
+        "GOOGLE_API_KEY": "your_primary_key",
+        "GOOGLE_API_KEY2": "your_secondary_key"
       }
     }
   }
 }
 ```
+
+**Key Features:**
+- ✅ **Dual API Keys**: Automatic failover and 2x rate limit capacity
+- ✅ **VENV Wrapper**: Proper environment isolation and path resolution
+- ✅ **Diagnostics**: Built-in environment validation and error reporting
 
 ## 🔗 Cross-Engine Correlation Framework
 

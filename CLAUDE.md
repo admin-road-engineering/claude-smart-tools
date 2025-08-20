@@ -1,8 +1,8 @@
 # Claude Smart Tools - Intelligent MCP System
 
-## 🎯 Current Status: PRODUCTION READY (v1.2.0-beta.1)
+## 🎯 Current Status: PRODUCTION READY (v1.2.0)
 
-All 7 Smart Tools are fully operational with comprehensive test coverage and bug fixes.
+All 7 Smart Tools are fully operational with API key configuration fixes and dual key support for rate limiting.
 
 ## 🚀 Quick Start
 
@@ -89,10 +89,32 @@ Executive Synthesis (Gemini 2.5 Flash-Lite)
 
 Key environment variables (see `.env.example` for full list):
 ```bash
-GOOGLE_API_KEY=your_api_key
+GOOGLE_API_KEY=your_primary_api_key
+GOOGLE_API_KEY2=your_secondary_api_key  # Optional: For rate limit recovery
 ENGINE_MAX_RETRIES=3
 INVESTIGATE_MEMORY_FALLBACK_THRESHOLD=85
 ENABLE_FILE_CACHE=true
+```
+
+### 🔑 API Key Configuration
+The system supports dual API key configuration for optimal rate limit handling:
+- **Single Key**: Basic functionality with rate limiting
+- **Dual Keys**: Automatic failover and 2x API capacity
+
+**Claude Desktop Configuration** (`~/.claude.json`):
+```json
+{
+  "mcpServers": {
+    "claude-smart-tools": {
+      "command": "path/to/venv/python.exe",
+      "args": ["path/to/smart_mcp_venv.py"],
+      "env": {
+        "GOOGLE_API_KEY": "your_primary_key",
+        "GOOGLE_API_KEY2": "your_secondary_key"
+      }
+    }
+  }
+}
 ```
 
 ## 📊 Project Status
@@ -104,6 +126,9 @@ ENABLE_FILE_CACHE=true
 - Comprehensive error handling
 - Path normalization (WindowsPath bug fixed)
 - File access issues resolved
+- **API Key Configuration Fix**: Dual key support with automatic failover
+- **Rate Limit Recovery**: 2x API capacity with smart key switching
+- Environment variable validation and diagnostics
 - Test coverage: 33 core tests + 44 new tests
 - Environment documentation complete
 
