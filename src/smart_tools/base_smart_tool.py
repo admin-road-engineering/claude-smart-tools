@@ -50,10 +50,16 @@ class BaseSmartTool(ABC):
         self.enable_correlation = os.environ.get('ENABLE_CORRELATION_ANALYSIS', 'true').lower() == 'true'
         
         # Initialize file content cache for this execution
-        self._file_content_cache = {}
+        self._file_content_cache = {}  # {file_path: (content, mtime)}
         self._cache_enabled = os.environ.get('ENABLE_FILE_CACHE', 'true').lower() == 'true'
         self._cache_hits = 0
         self._cache_misses = 0
+        self._cache_stale_hits = 0
+        
+        # Configurable cache parameters
+        self._cache_extensions = os.environ.get('CACHE_FILE_EXTENSIONS', 
+            '.py,.js,.ts,.java,.cpp,.c,.go,.rs,.cs,.rb,.php,.yaml,.json,.toml').split(',')
+        self._cache_dir_limit = int(os.environ.get('CACHE_DIR_LIMIT', '100'))
         
         if self.cpu_throttler:
             logger.debug(f"Smart tool {self.tool_name} initialized with CPU throttling and file caching")
@@ -106,9 +112,8 @@ class BaseSmartTool(ABC):
         # Pre-populate file content cache if enabled
         if self._cache_enabled and any(param in normalized_kwargs for param in path_params):
             await self._populate_file_cache(normalized_kwargs, path_params)
-            # Pass cache to engine if it supports it
-            if 'file_content_cache' not in normalized_kwargs:
-                normalized_kwargs['file_content_cache'] = self._file_content_cache
+            # Don't pass cache to engine directly - engines don't expect this parameter
+            # The cache is used internally to speed up file operations
         
         try:
             engine = self.engines[engine_name]
@@ -228,8 +233,9 @@ class BaseSmartTool(ABC):
         return "\n".join(report_parts) if report_parts else ""
     
     async def _populate_file_cache(self, kwargs: Dict[str, Any], path_params: List[str]) -> None:
-        """Pre-populate file content cache for better performance"""
+        """Pre-populate file content cache with timestamp validation for freshness"""
         import aiofiles
+        import os
         from pathlib import Path
         
         # Collect all unique file paths from kwargs
@@ -243,35 +249,51 @@ class BaseSmartTool(ABC):
                         if path.is_file():
                             all_files.add(str(path))
                         elif path.is_dir():
-                            # For directories, cache common source files
-                            for ext in ['.py', '.js', '.ts', '.java', '.cpp', '.c', '.go', '.rs']:
+                            # For directories, cache configurable source files
+                            for ext in self._cache_extensions:
                                 for file in path.rglob(f'*{ext}'):
                                     all_files.add(str(file))
-                                    if len(all_files) > 100:  # Limit cache size
+                                    if len(all_files) > self._cache_dir_limit:
                                         break
         
-        # Read files into cache
+        # Read files into cache with timestamp validation
         for file_path in all_files:
-            if file_path not in self._file_content_cache:
-                try:
-                    async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
-                        content = await f.read()
-                        self._file_content_cache[file_path] = content
-                        self._cache_misses += 1
-                        logger.debug(f"Cached file content: {file_path}")
-                except Exception as e:
-                    logger.debug(f"Could not cache file {file_path}: {e}")
-            else:
-                self._cache_hits += 1
-                logger.debug(f"Cache hit for file: {file_path}")
+            try:
+                current_mtime = os.path.getmtime(file_path)
+                
+                # Check if file is in cache and if it's still fresh
+                if file_path in self._file_content_cache:
+                    cached_content, cached_mtime = self._file_content_cache[file_path]
+                    if cached_mtime == current_mtime:
+                        self._cache_hits += 1
+                        logger.debug(f"Cache hit (fresh) for file: {file_path}")
+                        continue
+                    else:
+                        self._cache_stale_hits += 1
+                        logger.debug(f"Cache stale for file: {file_path}, re-reading")
+                
+                # Read the file (either not cached or stale)
+                async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
+                    content = await f.read()
+                    self._file_content_cache[file_path] = (content, current_mtime)
+                    self._cache_misses += 1
+                    logger.debug(f"Cached file content with mtime: {file_path}")
+                    
+            except Exception as e:
+                logger.debug(f"Could not cache file {file_path}: {e}")
     
-    def get_cache_stats(self) -> Dict[str, int]:
+    def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics for debugging and optimization"""
+        total_accesses = self._cache_hits + self._cache_misses + self._cache_stale_hits
         return {
             'cache_hits': self._cache_hits,
             'cache_misses': self._cache_misses,
+            'cache_stale_hits': self._cache_stale_hits,
             'cache_size': len(self._file_content_cache),
-            'cache_hit_rate': self._cache_hits / (self._cache_hits + self._cache_misses) if (self._cache_hits + self._cache_misses) > 0 else 0
+            'cache_hit_rate': self._cache_hits / total_accesses if total_accesses > 0 else 0,
+            'cache_freshness_rate': self._cache_hits / (self._cache_hits + self._cache_stale_hits) if (self._cache_hits + self._cache_stale_hits) > 0 else 1.0,
+            'cache_extensions': self._cache_extensions,
+            'cache_dir_limit': self._cache_dir_limit
         }
     
     def clear_cache(self) -> None:
