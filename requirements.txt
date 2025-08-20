@@ -17,3 +17,5 @@ python-dotenv>=1.0.0   # Environment variable loading
 # Development dependencies
 pytest>=7.0.0
 pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0      # Coverage reporting
+pytest-mock>=3.10.0    # Mocking support
