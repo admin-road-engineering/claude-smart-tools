@@ -128,8 +128,6 @@ class SmartToolsMcpServer:
             logger.info("Attempting imports from local gemini-engines...")
             
             # Add gemini-engines to path for imports
-            import sys
-            import os
             current_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(current_dir)
             gemini_engines_path = os.path.join(project_root, "gemini-engines")
