@@ -128,53 +128,43 @@ class UnderstandTool(BaseSmartTool):
         results = {}
         
         try:
-            # Phase 1: Get architectural overview
+            import asyncio
+            
+            # Pre-compute documentation files for parallel execution
+            doc_files = self._find_documentation_files(files) if 'analyze_docs' in routing_strategy['engines'] else []
+            
+            # Group independent tasks for parallel execution
+            parallel_tasks = []
+            
+            # Phase 1: Core architectural analysis (always included)
             if 'analyze_code' in routing_strategy['engines']:
-                code_result = await self.execute_engine(
-                    'analyze_code',
-                    paths=files,
-                    analysis_type='architecture',
-                    question=question,
-                    verbose=True
-                )
-                results['architecture'] = code_result
-                engines_used.append('analyze_code')
+                parallel_tasks.append(self._run_architectural_analysis(files, question))
             
-            # Phase 2: Find specific patterns if question provided
+            # Phase 2: Pattern search (if question provided)
             if question and 'search_code' in routing_strategy['engines']:
-                search_result = await self.execute_engine(
-                    'search_code',
-                    query=question,
-                    paths=files,
-                    context_question=f"How does this relate to: {question}",
-                    output_format='text'
-                )
-                results['patterns'] = search_result
-                engines_used.append('search_code')
+                parallel_tasks.append(self._run_pattern_search(files, question))
             
-            # Phase 3: Include documentation context
-            if 'analyze_docs' in routing_strategy['engines']:
-                # Use consistent file finding logic
-                doc_files = self._find_documentation_files(files)
-                if doc_files:
-                    doc_result = await self.execute_engine(
-                        'analyze_docs',
-                        sources=doc_files,
-                        synthesis_type='summary',
-                        questions=[question] if question else None
-                    )
-                    results['documentation'] = doc_result
-                    engines_used.append('analyze_docs')
+            # Phase 3: Documentation analysis (if docs found)
+            if 'analyze_docs' in routing_strategy['engines'] and doc_files:
+                parallel_tasks.append(self._run_documentation_analysis(doc_files, question))
             
-            # Phase 4: Dependency analysis for architectural understanding
+            # Phase 4: Dependency analysis (for multi-file projects)
             if 'map_dependencies' in routing_strategy['engines']:
-                dep_result = await self.execute_engine(
-                    'map_dependencies',
-                    project_paths=files,
-                    analysis_depth='transitive'
-                )
-                results['dependencies'] = dep_result
-                engines_used.append('map_dependencies')
+                parallel_tasks.append(self._run_dependency_analysis(files))
+            
+            # Execute all analysis phases in parallel
+            if parallel_tasks:
+                parallel_results = await asyncio.gather(*parallel_tasks, return_exceptions=True)
+                
+                # Process results and extract engine usage
+                for result in parallel_results:
+                    if isinstance(result, Exception):
+                        logger.error(f"Parallel understanding task failed: {result}")
+                    elif isinstance(result, dict):
+                        for phase_name, phase_data in result.items():
+                            results[phase_name] = phase_data['result']
+                            if 'engine' in phase_data:
+                                engines_used.append(phase_data['engine'])
             
             # Synthesize results
             synthesized_result = self._synthesize_understanding(results, question)
@@ -201,7 +191,9 @@ class UnderstandTool(BaseSmartTool):
                 metadata={
                     'files_analyzed': len(files),
                     'question': question,
-                    'phases_completed': len(results)
+                    'phases_completed': len(results),
+                    'performance_mode': 'parallel',
+                    'parallel_tasks': len(parallel_tasks) if 'parallel_tasks' in locals() else 0
                 }
             )
             
@@ -313,3 +305,57 @@ class UnderstandTool(BaseSmartTool):
             points.append("- Analysis completed - see detailed results above")
         
         return '\n'.join(points)
+    
+    # Parallel execution helper methods
+    async def _run_architectural_analysis(self, files: List[str], question: str = None) -> Dict[str, Any]:
+        """Run architectural analysis in parallel"""
+        try:
+            result = await self.execute_engine(
+                'analyze_code',
+                paths=files,
+                analysis_type='architecture',
+                question=question,
+                verbose=True
+            )
+            return {'architecture': {'result': result, 'engine': 'analyze_code'}}
+        except Exception as e:
+            return {'architecture': {'result': f"Architectural analysis failed: {str(e)}", 'engine': 'analyze_code'}}
+    
+    async def _run_pattern_search(self, files: List[str], question: str) -> Dict[str, Any]:
+        """Run pattern search in parallel"""
+        try:
+            result = await self.execute_engine(
+                'search_code',
+                query=question,
+                paths=files,
+                context_question=f"How does this relate to: {question}",
+                output_format='text'
+            )
+            return {'patterns': {'result': result, 'engine': 'search_code'}}
+        except Exception as e:
+            return {'patterns': {'result': f"Pattern search failed: {str(e)}", 'engine': 'search_code'}}
+    
+    async def _run_documentation_analysis(self, doc_files: List[str], question: str = None) -> Dict[str, Any]:
+        """Run documentation analysis in parallel"""
+        try:
+            result = await self.execute_engine(
+                'analyze_docs',
+                sources=doc_files,
+                synthesis_type='summary',
+                questions=[question] if question else None
+            )
+            return {'documentation': {'result': result, 'engine': 'analyze_docs'}}
+        except Exception as e:
+            return {'documentation': {'result': f"Documentation analysis failed: {str(e)}", 'engine': 'analyze_docs'}}
+    
+    async def _run_dependency_analysis(self, files: List[str]) -> Dict[str, Any]:
+        """Run dependency analysis in parallel"""
+        try:
+            result = await self.execute_engine(
+                'map_dependencies',
+                project_paths=files,
+                analysis_depth='transitive'
+            )
+            return {'dependencies': {'result': result, 'engine': 'map_dependencies'}}
+        except Exception as e:
+            return {'dependencies': {'result': f"Dependency analysis failed: {str(e)}", 'engine': 'map_dependencies'}}

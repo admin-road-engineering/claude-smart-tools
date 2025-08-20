@@ -145,8 +145,10 @@ class ValidateTool(BaseSmartTool):
     async def execute(self, files: List[str], validation_type: str = "all", 
                      severity: str = "medium", **kwargs) -> SmartToolResult:
         """
-        Execute comprehensive validation using coordinated multi-engine analysis
+        Execute comprehensive validation using parallel multi-engine analysis
         """
+        import asyncio
+        
         try:
             routing_strategy = self.get_routing_strategy(
                 files=files, validation_type=validation_type, severity=severity, **kwargs
@@ -157,124 +159,80 @@ class ValidateTool(BaseSmartTool):
             issues_found = []
             total_issues = 0
             
-            # Phase 1: Core Quality Analysis
+            # Pre-compute file categories for engines
+            config_files = self._find_config_files(files)
+            source_files = self._detect_source_files(files)
+            api_files = self._detect_api_files(files)
+            db_files = self._detect_database_files(files)
+            quality_focus = self._map_validation_to_quality_focus(validation_type)
+            
+            # Group engines into parallel execution batches
+            # Batch 1: Independent analysis engines (can run in parallel)
+            parallel_tasks = []
+            
             if 'check_quality' in engines_used:
-                quality_focus = self._map_validation_to_quality_focus(validation_type)
-                quality_result = await self.execute_engine(
-                    'check_quality',
-                    paths=files,
-                    check_type=quality_focus,
-                    verbose=True
-                )
-                validation_results['quality'] = quality_result
-                quality_issues = self._extract_issues_from_result(quality_result, "quality")
-                issues_found.extend(quality_issues)
-                total_issues += len(quality_issues)
+                parallel_tasks.append(self._run_quality_analysis(files, quality_focus))
             
-            # Phase 2: Security Configuration Validation
-            if 'config_validator' in engines_used:
-                config_files = self._find_config_files(files)
-                if config_files:
-                    config_result = await self.execute_engine(
-                        'config_validator',
-                        config_paths=config_files,
-                        validation_type="security"
-                    )
-                    validation_results['security_config'] = config_result
-                    config_issues = self._extract_issues_from_result(config_result, "security")
-                    issues_found.extend(config_issues)
-                    total_issues += len(config_issues)
+            if 'config_validator' in engines_used and config_files:
+                parallel_tasks.append(self._run_config_validation(config_files))
             
-            # Phase 3: Interface Consistency Analysis
-            if 'interface_inconsistency_detector' in engines_used:
-                source_files = self._detect_source_files(files)
-                if source_files:
-                    consistency_result = await self.execute_engine(
-                        'interface_inconsistency_detector',
-                        source_paths=source_files,
-                        pattern_types=["naming", "parameters", "return_types"]
-                    )
-                    validation_results['consistency'] = consistency_result
-                    consistency_issues = self._extract_issues_from_result(consistency_result, "consistency")
-                    issues_found.extend(consistency_issues)
-                    total_issues += len(consistency_issues)
+            if 'interface_inconsistency_detector' in engines_used and source_files:
+                parallel_tasks.append(self._run_consistency_analysis(source_files))
             
-            # Phase 4: Performance Validation
+            if 'api_contract_checker' in engines_used and api_files:
+                parallel_tasks.append(self._run_api_validation(api_files))
+            
+            if 'analyze_database' in engines_used and db_files:
+                parallel_tasks.append(self._run_database_analysis(db_files))
+            
+            if 'analyze_test_coverage' in engines_used and source_files:
+                parallel_tasks.append(self._run_test_coverage_analysis(source_files))
+            
+            # Execute independent engines in parallel
+            if parallel_tasks:
+                parallel_results = await asyncio.gather(*parallel_tasks, return_exceptions=True)
+                
+                # Process parallel results
+                for result in parallel_results:
+                    if isinstance(result, Exception):
+                        # Log error but continue with other results
+                        import logging
+                        logging.getLogger(__name__).error(f"Parallel validation task failed: {result}")
+                    elif isinstance(result, dict):
+                        # Merge successful results
+                        for category, data in result.items():
+                            validation_results[category] = data['result']
+                            if 'issues' in data:
+                                issues_found.extend(data['issues'])
+                                total_issues += len(data['issues'])
+            
+            # Batch 2: Dependent engines (run after file analysis)
+            dependent_tasks = []
+            
             if 'performance_profiler' in engines_used:
-                perf_result = await self.execute_engine(
-                    'performance_profiler',
-                    target_operation="validation_analysis"
-                )
-                validation_results['performance'] = perf_result
-                perf_issues = self._extract_issues_from_result(perf_result, "performance")
-                issues_found.extend(perf_issues)
-                total_issues += len(perf_issues)
+                dependent_tasks.append(self._run_performance_analysis())
             
-            # Phase 5: API Contract Validation
-            if 'api_contract_checker' in engines_used:
-                api_files = self._detect_api_files(files)
-                if api_files:
-                    api_result = await self.execute_engine(
-                        'api_contract_checker',
-                        spec_paths=api_files,
-                        comparison_mode="standalone"
-                    )
-                    validation_results['api_contracts'] = api_result
-                    api_issues = self._extract_issues_from_result(api_result, "api")
-                    issues_found.extend(api_issues)
-                    total_issues += len(api_issues)
-            
-            # Phase 6: Database Schema Validation
-            if 'analyze_database' in engines_used:
-                db_files = self._detect_database_files(files)
-                if db_files:
-                    db_result = await self.execute_engine(
-                        'analyze_database',
-                        schema_paths=db_files,
-                        analysis_type="optimization"
-                    )
-                    validation_results['database'] = db_result
-                    db_issues = self._extract_issues_from_result(db_result, "database")
-                    issues_found.extend(db_issues)
-                    total_issues += len(db_issues)
-            
-            # Phase 7: Test Coverage Validation
-            if 'analyze_test_coverage' in engines_used:
-                source_files = self._detect_source_files(files)
-                if source_files:
-                    test_result = await self.execute_engine(
-                        'analyze_test_coverage',
-                        source_paths=source_files
-                    )
-                    validation_results['test_coverage'] = test_result
-                    test_issues = self._extract_issues_from_result(test_result, "testing")
-                    issues_found.extend(test_issues)
-                    total_issues += len(test_issues)
-            
-            # Phase 8: Dependency Analysis
             if 'map_dependencies' in engines_used:
-                dep_result = await self.execute_engine(
-                    'map_dependencies',
-                    project_paths=files,
-                    analysis_depth="transitive"
-                )
-                validation_results['dependencies'] = dep_result
-                dep_issues = self._extract_issues_from_result(dep_result, "dependencies")
-                issues_found.extend(dep_issues)
-                total_issues += len(dep_issues)
+                dependent_tasks.append(self._run_dependency_analysis(files))
             
-            # Phase 9: Architectural Review
             if 'analyze_code' in engines_used:
-                arch_result = await self.execute_engine(
-                    'analyze_code',
-                    paths=files,
-                    analysis_type="refactor_prep",
-                    question="What potential issues exist in this code?"
-                )
-                validation_results['architecture'] = arch_result
-                arch_issues = self._extract_issues_from_result(arch_result, "architecture")
-                issues_found.extend(arch_issues)
-                total_issues += len(arch_issues)
+                dependent_tasks.append(self._run_architectural_analysis(files))
+            
+            # Execute dependent engines in parallel
+            if dependent_tasks:
+                dependent_results = await asyncio.gather(*dependent_tasks, return_exceptions=True)
+                
+                # Process dependent results
+                for result in dependent_results:
+                    if isinstance(result, Exception):
+                        import logging
+                        logging.getLogger(__name__).error(f"Dependent validation task failed: {result}")
+                    elif isinstance(result, dict):
+                        for category, data in result.items():
+                            validation_results[category] = data['result']
+                            if 'issues' in data:
+                                issues_found.extend(data['issues'])
+                                total_issues += len(data['issues'])
             
             # Filter issues by severity
             filtered_issues = self._filter_issues_by_severity(issues_found, severity)
@@ -335,7 +293,9 @@ class ValidateTool(BaseSmartTool):
                     "total_issues": total_issues,
                     "filtered_issues": len(filtered_issues),
                     "critical_issues": len(critical_issues),
-                    "phases_completed": len(validation_results)
+                    "phases_completed": len(validation_results),
+                    "performance_mode": "parallel",
+                    "parallel_batches": 2
                 },
                 correlations=correlations,
                 conflicts=conflicts,
@@ -545,3 +505,121 @@ class ValidateTool(BaseSmartTool):
             ])
         
         return "\n".join(report_sections)
+    
+    # Parallel execution helper methods
+    async def _run_quality_analysis(self, files: List[str], quality_focus: str) -> Dict[str, Any]:
+        """Run quality analysis in parallel batch"""
+        try:
+            result = await self.execute_engine(
+                'check_quality',
+                paths=files,
+                check_type=quality_focus,
+                verbose=True
+            )
+            issues = self._extract_issues_from_result(result, "quality")
+            return {'quality': {'result': result, 'issues': issues}}
+        except Exception as e:
+            return {'quality': {'result': f"Quality analysis failed: {str(e)}", 'issues': []}}
+    
+    async def _run_config_validation(self, config_files: List[str]) -> Dict[str, Any]:
+        """Run config validation in parallel batch"""
+        try:
+            result = await self.execute_engine(
+                'config_validator',
+                config_paths=config_files,
+                validation_type="security"
+            )
+            issues = self._extract_issues_from_result(result, "security")
+            return {'security_config': {'result': result, 'issues': issues}}
+        except Exception as e:
+            return {'security_config': {'result': f"Config validation failed: {str(e)}", 'issues': []}}
+    
+    async def _run_consistency_analysis(self, source_files: List[str]) -> Dict[str, Any]:
+        """Run consistency analysis in parallel batch"""
+        try:
+            result = await self.execute_engine(
+                'interface_inconsistency_detector',
+                source_paths=source_files,
+                pattern_types=["naming", "parameters", "return_types"]
+            )
+            issues = self._extract_issues_from_result(result, "consistency")
+            return {'consistency': {'result': result, 'issues': issues}}
+        except Exception as e:
+            return {'consistency': {'result': f"Consistency analysis failed: {str(e)}", 'issues': []}}
+    
+    async def _run_api_validation(self, api_files: List[str]) -> Dict[str, Any]:
+        """Run API validation in parallel batch"""
+        try:
+            result = await self.execute_engine(
+                'api_contract_checker',
+                spec_paths=api_files,
+                comparison_mode="standalone"
+            )
+            issues = self._extract_issues_from_result(result, "api")
+            return {'api_contracts': {'result': result, 'issues': issues}}
+        except Exception as e:
+            return {'api_contracts': {'result': f"API validation failed: {str(e)}", 'issues': []}}
+    
+    async def _run_database_analysis(self, db_files: List[str]) -> Dict[str, Any]:
+        """Run database analysis in parallel batch"""
+        try:
+            result = await self.execute_engine(
+                'analyze_database',
+                schema_paths=db_files,
+                analysis_type="optimization"
+            )
+            issues = self._extract_issues_from_result(result, "database")
+            return {'database': {'result': result, 'issues': issues}}
+        except Exception as e:
+            return {'database': {'result': f"Database analysis failed: {str(e)}", 'issues': []}}
+    
+    async def _run_test_coverage_analysis(self, source_files: List[str]) -> Dict[str, Any]:
+        """Run test coverage analysis in parallel batch"""
+        try:
+            result = await self.execute_engine(
+                'analyze_test_coverage',
+                source_paths=source_files
+            )
+            issues = self._extract_issues_from_result(result, "testing")
+            return {'test_coverage': {'result': result, 'issues': issues}}
+        except Exception as e:
+            return {'test_coverage': {'result': f"Test coverage analysis failed: {str(e)}", 'issues': []}}
+    
+    async def _run_performance_analysis(self) -> Dict[str, Any]:
+        """Run performance analysis in dependent batch"""
+        try:
+            result = await self.execute_engine(
+                'performance_profiler',
+                target_operation="validation_analysis"
+            )
+            issues = self._extract_issues_from_result(result, "performance")
+            return {'performance': {'result': result, 'issues': issues}}
+        except Exception as e:
+            return {'performance': {'result': f"Performance analysis failed: {str(e)}", 'issues': []}}
+    
+    async def _run_dependency_analysis(self, files: List[str]) -> Dict[str, Any]:
+        """Run dependency analysis in dependent batch"""
+        try:
+            result = await self.execute_engine(
+                'map_dependencies',
+                project_paths=files,
+                analysis_depth="transitive"
+            )
+            issues = self._extract_issues_from_result(result, "dependencies")
+            return {'dependencies': {'result': result, 'issues': issues}}
+        except Exception as e:
+            return {'dependencies': {'result': f"Dependency analysis failed: {str(e)}", 'issues': []}}
+    
+    async def _run_architectural_analysis(self, files: List[str]) -> Dict[str, Any]:
+        """Run architectural analysis in dependent batch"""
+        try:
+            result = await self.execute_engine(
+                'analyze_code',
+                paths=files,
+                analysis_type="refactor_prep",
+                question="What potential issues exist in this code?"
+            )
+            issues = self._extract_issues_from_result(result, "architecture")
+            return {'architecture': {'result': result, 'issues': issues}}
+        except Exception as e:
+            return {'architecture': {'result': f"Architectural analysis failed: {str(e)}", 'issues': []}}

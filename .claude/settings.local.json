@@ -33,7 +33,8 @@
       "Bash(cp:*)",
       "mcp__gemini-review__review_output",
       "Bash(\"C:\\Users\\Admin\\miniconda3\\python.exe\" \"C:\\Users\\Admin\\claude-smart-tools\\src\\smart_mcp_server.py\" --help)",
-      "Bash(git stash push:*)"
+      "Bash(git stash push:*)",
+      "Bash(git commit:*)"
     ],
     "deny": []
   }
