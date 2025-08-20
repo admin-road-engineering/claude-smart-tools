@@ -49,8 +49,14 @@ class BaseSmartTool(ABC):
         self._correlation_framework = None
         self.enable_correlation = os.environ.get('ENABLE_CORRELATION_ANALYSIS', 'true').lower() == 'true'
         
+        # Initialize file content cache for this execution
+        self._file_content_cache = {}
+        self._cache_enabled = os.environ.get('ENABLE_FILE_CACHE', 'true').lower() == 'true'
+        self._cache_hits = 0
+        self._cache_misses = 0
+        
         if self.cpu_throttler:
-            logger.debug(f"Smart tool {self.tool_name} initialized with CPU throttling")
+            logger.debug(f"Smart tool {self.tool_name} initialized with CPU throttling and file caching")
         else:
             logger.warning(f"Smart tool {self.tool_name} initialized without CPU throttling")
     
@@ -69,7 +75,7 @@ class BaseSmartTool(ABC):
         return list(self.engines.keys())
     
     async def execute_engine(self, engine_name: str, **kwargs) -> Any:
-        """Execute a specific engine with improved error handling and CPU throttling"""
+        """Execute a specific engine with improved error handling, CPU throttling, and file caching"""
         if engine_name not in self.engines:
             return f"Engine {engine_name} not available"
         
@@ -96,6 +102,13 @@ class BaseSmartTool(ABC):
                 elif isinstance(value, (list, tuple)):
                     normalized_kwargs[param] = [str(item) for item in value]
                     logger.debug(f"Normalized {len(value)} paths to strings for {param}")
+        
+        # Pre-populate file content cache if enabled
+        if self._cache_enabled and any(param in normalized_kwargs for param in path_params):
+            await self._populate_file_cache(normalized_kwargs, path_params)
+            # Pass cache to engine if it supports it
+            if 'file_content_cache' not in normalized_kwargs:
+                normalized_kwargs['file_content_cache'] = self._file_content_cache
         
         try:
             engine = self.engines[engine_name]
@@ -213,3 +226,55 @@ class BaseSmartTool(ABC):
             report_parts.append(f"\n**Analysis Summary**: {correlation_data['summary']}")
         
         return "\n".join(report_parts) if report_parts else ""
+    
+    async def _populate_file_cache(self, kwargs: Dict[str, Any], path_params: List[str]) -> None:
+        """Pre-populate file content cache for better performance"""
+        import aiofiles
+        from pathlib import Path
+        
+        # Collect all unique file paths from kwargs
+        all_files = set()
+        for param in path_params:
+            if param in kwargs:
+                paths = kwargs[param]
+                if isinstance(paths, (list, tuple)):
+                    for path in paths:
+                        path = Path(str(path))
+                        if path.is_file():
+                            all_files.add(str(path))
+                        elif path.is_dir():
+                            # For directories, cache common source files
+                            for ext in ['.py', '.js', '.ts', '.java', '.cpp', '.c', '.go', '.rs']:
+                                for file in path.rglob(f'*{ext}'):
+                                    all_files.add(str(file))
+                                    if len(all_files) > 100:  # Limit cache size
+                                        break
+        
+        # Read files into cache
+        for file_path in all_files:
+            if file_path not in self._file_content_cache:
+                try:
+                    async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
+                        content = await f.read()
+                        self._file_content_cache[file_path] = content
+                        self._cache_misses += 1
+                        logger.debug(f"Cached file content: {file_path}")
+                except Exception as e:
+                    logger.debug(f"Could not cache file {file_path}: {e}")
+            else:
+                self._cache_hits += 1
+                logger.debug(f"Cache hit for file: {file_path}")
+    
+    def get_cache_stats(self) -> Dict[str, int]:
+        """Get cache statistics for debugging and optimization"""
+        return {
+            'cache_hits': self._cache_hits,
+            'cache_misses': self._cache_misses,
+            'cache_size': len(self._file_content_cache),
+            'cache_hit_rate': self._cache_hits / (self._cache_hits + self._cache_misses) if (self._cache_hits + self._cache_misses) > 0 else 0
+        }
+    
+    def clear_cache(self) -> None:
+        """Clear the file content cache to free memory"""
+        self._file_content_cache.clear()
+        logger.info(f"Cleared file cache. Stats: {self.get_cache_stats()}")
