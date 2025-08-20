@@ -3,8 +3,13 @@ Validate Tool - Smart tool for quality assurance, security, performance, standar
 Routes to check_quality + config_validator + interface_inconsistency_detector based on validation type
 """
 from typing import List, Dict, Any, Optional
+import asyncio
+import logging
+import psutil  # For memory monitoring
 from .base_smart_tool import BaseSmartTool, SmartToolResult
 from .executive_synthesizer import ExecutiveSynthesizer
+
+logger = logging.getLogger(__name__)
 
 
 class ValidateTool(BaseSmartTool):
@@ -146,10 +151,19 @@ class ValidateTool(BaseSmartTool):
                      severity: str = "medium", **kwargs) -> SmartToolResult:
         """
         Execute comprehensive validation using parallel multi-engine analysis
+        with memory safeguards and robust error aggregation
         """
-        import asyncio
-        
         try:
+            # Memory safeguard: Check available memory before parallel execution
+            memory = psutil.virtual_memory()
+            if memory.percent > 85:
+                logger.warning(f"High memory usage detected: {memory.percent}%. Using reduced parallelism.")
+                max_parallel = 2  # Reduce parallel tasks when memory is constrained
+            else:
+                max_parallel = 6  # Normal parallel execution
+            
+            # Track execution errors for aggregation
+            execution_errors = []
             routing_strategy = self.get_routing_strategy(
                 files=files, validation_type=validation_type, severity=severity, **kwargs
             )
@@ -188,16 +202,28 @@ class ValidateTool(BaseSmartTool):
             if 'analyze_test_coverage' in engines_used and source_files:
                 parallel_tasks.append(self._run_test_coverage_analysis(source_files))
             
-            # Execute independent engines in parallel
+            # Execute independent engines in parallel with memory-aware batching
             if parallel_tasks:
-                parallel_results = await asyncio.gather(*parallel_tasks, return_exceptions=True)
+                # Use semaphore to limit concurrent tasks based on memory
+                semaphore = asyncio.Semaphore(max_parallel)
                 
-                # Process parallel results
-                for result in parallel_results:
+                async def run_with_semaphore(task):
+                    async with semaphore:
+                        return await task
+                
+                # Wrap tasks with semaphore
+                limited_tasks = [run_with_semaphore(task) for task in parallel_tasks]
+                parallel_results = await asyncio.gather(*limited_tasks, return_exceptions=True)
+                
+                # Enhanced error aggregation and reporting
+                for i, result in enumerate(parallel_results):
                     if isinstance(result, Exception):
-                        # Log error but continue with other results
-                        import logging
-                        logging.getLogger(__name__).error(f"Parallel validation task failed: {result}")
+                        # Track and log error with context
+                        error_msg = f"Engine task {i} failed: {type(result).__name__}: {str(result)}"
+                        logger.error(error_msg)
+                        execution_errors.append(error_msg)
+                        # Add failure placeholder to results
+                        validation_results[f'failed_task_{i}'] = f"Analysis failed: {str(result)[:200]}"
                     elif isinstance(result, dict):
                         # Merge successful results
                         for category, data in result.items():
@@ -218,15 +244,19 @@ class ValidateTool(BaseSmartTool):
             if 'analyze_code' in engines_used:
                 dependent_tasks.append(self._run_architectural_analysis(files))
             
-            # Execute dependent engines in parallel
+            # Execute dependent engines in parallel with same memory safeguards
             if dependent_tasks:
-                dependent_results = await asyncio.gather(*dependent_tasks, return_exceptions=True)
+                # Reuse semaphore for dependent tasks
+                limited_dependent = [run_with_semaphore(task) for task in dependent_tasks]
+                dependent_results = await asyncio.gather(*limited_dependent, return_exceptions=True)
                 
-                # Process dependent results
-                for result in dependent_results:
+                # Process dependent results with enhanced error tracking
+                for i, result in enumerate(dependent_results):
                     if isinstance(result, Exception):
-                        import logging
-                        logging.getLogger(__name__).error(f"Dependent validation task failed: {result}")
+                        error_msg = f"Dependent task {i} failed: {type(result).__name__}: {str(result)}"
+                        logger.error(error_msg)
+                        execution_errors.append(error_msg)
+                        validation_results[f'failed_dependent_{i}'] = f"Analysis failed: {str(result)[:200]}"
                     elif isinstance(result, dict):
                         for category, data in result.items():
                             validation_results[category] = data['result']
@@ -242,9 +272,9 @@ class ValidateTool(BaseSmartTool):
             if len(validation_results) > 1:
                 correlation_data = await self.analyze_correlations(validation_results)
             
-            # Generate validation report
+            # Generate validation report with error reporting
             validation_report = self._synthesize_validation_report(
-                validation_type, validation_results, filtered_issues, total_issues, routing_strategy
+                validation_type, validation_results, filtered_issues, total_issues, routing_strategy, execution_errors
             )
             
             # Add correlation report if available
@@ -295,7 +325,11 @@ class ValidateTool(BaseSmartTool):
                     "critical_issues": len(critical_issues),
                     "phases_completed": len(validation_results),
                     "performance_mode": "parallel",
-                    "parallel_batches": 2
+                    "parallel_batches": 2,
+                    "max_parallel_tasks": max_parallel,
+                    "memory_usage_percent": memory.percent,
+                    "execution_errors": len(execution_errors),
+                    "error_details": execution_errors[:5] if execution_errors else []  # Include first 5 errors
                 },
                 correlations=correlations,
                 conflicts=conflicts,
@@ -379,8 +413,10 @@ class ValidateTool(BaseSmartTool):
     
     def _synthesize_validation_report(self, validation_type: str, validation_results: Dict[str, Any], 
                                     issues: List[Dict[str, Any]], total_issues: int, 
-                                    routing_strategy: Dict[str, Any]) -> str:
-        """Synthesize validation results into a comprehensive report"""
+                                    routing_strategy: Dict[str, Any], execution_errors: List[str] = None) -> str:
+        """Synthesize validation results into a comprehensive report with error tracking"""
+        if execution_errors is None:
+            execution_errors = []
         
         # Count issues by category and severity
         issues_by_category = {}
@@ -414,6 +450,18 @@ class ValidateTool(BaseSmartTool):
             report_sections.extend([
                 "## 📋 Issues by Category",
                 *[f"- **{category.title()}**: {count} issues" for category, count in issues_by_category.items()],
+                ""
+            ])
+        
+        # Add execution error reporting if any failures occurred
+        if execution_errors:
+            report_sections.extend([
+                "## ⚠️ Partial Analysis - Some Engines Failed",
+                f"**{len(execution_errors)} engine(s) encountered errors during analysis:**",
+                "",
+                *[f"- {error}" for error in execution_errors[:5]],  # Show first 5 errors
+                "",
+                "**Note**: Results may be incomplete. Please review the errors above.",
                 ""
             ])
         
