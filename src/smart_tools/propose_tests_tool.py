@@ -309,7 +309,7 @@ class ProposeTestsTool(BaseSmartTool):
     def _synthesize_test_proposals(self, test_type: str, proposals: List[Dict[str, Any]], 
                                  analysis_results: Dict[str, Any], routing_strategy: Dict[str, Any],
                                  coverage_threshold: float) -> str:
-        """Synthesize test proposals into actionable recommendations"""
+        """Synthesize test proposals into actionable recommendations with response size management"""
         
         # Group proposals by priority and type
         high_priority = [p for p in proposals if p.get('priority') == 'high']
@@ -370,34 +370,25 @@ class ProposeTestsTool(BaseSmartTool):
                 ""
             ])
         
-        # Detailed Analysis Results
-        if 'coverage' in analysis_results:
-            report_sections.extend([
-                "## 📈 Test Coverage Analysis",
-                str(analysis_results['coverage']),
-                ""
-            ])
+        # Truncated Analysis Results - Include only summaries to stay within token limits
+        report_sections.extend([
+            "## 📋 Analysis Results Summary",
+            "**Note**: Detailed analysis results truncated to stay within response limits.",
+            "**Recommendation**: Run individual tools for complete analysis details.",
+            ""
+        ])
         
-        if 'code_structure' in analysis_results:
-            report_sections.extend([
-                "## 🏗️ Code Structure Analysis",
-                str(analysis_results['code_structure']),
-                ""
-            ])
-        
-        if 'test_patterns' in analysis_results:
-            report_sections.extend([
-                "## 🔍 Existing Test Patterns",
-                str(analysis_results['test_patterns']),
-                ""
-            ])
-        
-        if 'quality' in analysis_results:
-            report_sections.extend([
-                "## 📋 Quality-Based Prioritization",
-                str(analysis_results['quality']),
-                ""
-            ])
+        # Summarize each analysis phase
+        for phase_name, phase_result in analysis_results.items():
+            if phase_name != 'conventions':  # Already handled above
+                result_str = str(phase_result)
+                # Get first 200 characters as summary
+                summary = result_str[:200] + "..." if len(result_str) > 200 else result_str
+                report_sections.extend([
+                    f"### {phase_name.replace('_', ' ').title()}",
+                    summary,
+                    ""
+                ])
         
         # Actionable Next Steps
         report_sections.extend([
@@ -410,4 +401,39 @@ class ProposeTestsTool(BaseSmartTool):
             ""
         ])
         
-        return "\n".join(report_sections)
+        # Simple check: if too big, save to file
+        full_report = "\n".join(report_sections)
+        
+        if len(full_report) > 60000:  # ~15k tokens
+            import os
+            import time
+            
+            os.makedirs("smart_tool_results", exist_ok=True)
+            filename = f"smart_tool_results/propose_tests_{int(time.time())}.md"
+            
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(full_report)
+            
+            # Return short summary instead
+            return f"""# 🧪 Test Proposals Summary
+
+## 📊 Quick Stats
+- **High Priority Items**: {len(high_priority)}
+- **Medium Priority Items**: {len(medium_priority)}
+- **Analysis Phases**: {len(analysis_results)}
+
+## 🚨 Top 3 Priority Actions
+1. {high_priority[0]['description'] if high_priority else 'N/A'}
+2. {high_priority[1]['description'] if len(high_priority) > 1 else 'N/A'}
+3. {high_priority[2]['description'] if len(high_priority) > 2 else 'N/A'}
+
+## 📁 Complete Analysis
+Full detailed analysis saved to: `{filename}`
+
+## 🎯 Next Steps
+- Review the complete analysis file for all details
+- Focus on high priority items first
+- Use the detailed recommendations in the file
+"""
+        
+        return full_report  # Normal case

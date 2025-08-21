@@ -112,6 +112,13 @@ class InvestigateTool(BaseSmartTool):
             if project_context and project_context.get('claude_md_content'):
                 logger.info(f"Using project-specific CLAUDE.md for investigation ({len(project_context['claude_md_content'])} chars)")
             
+            # Initialize variables needed by both sequential and parallel modes
+            routing_strategy = self.get_routing_strategy(files=files, problem=problem, **kwargs)
+            engines_used = routing_strategy['engines']
+            problem_type = routing_strategy.get('problem_type', 'general')
+            search_keywords = self._extract_search_keywords(problem)
+            quality_focus = self._map_problem_to_quality_focus(problem_type)
+            
             # Memory safeguard: Check available memory before parallel execution
             memory = await asyncio.to_thread(psutil.virtual_memory)
             if memory.percent > self._memory_fallback_threshold:
@@ -124,9 +131,6 @@ class InvestigateTool(BaseSmartTool):
             if self._execution_mode == 'sequential' or (memory.percent > self._memory_fallback_threshold and self._sequential_fallback):
                 logger.info(f"Using sequential execution mode (memory: {memory.percent}%)")
                 analysis_results = await self._execute_sequential_investigation(files, problem, **kwargs)
-                routing_strategy = self.get_routing_strategy(files=files, problem=problem, **kwargs)
-                engines_used = routing_strategy['engines']
-                problem_type = routing_strategy.get('problem_type', 'general')
                 execution_errors = []
                 
                 # Check for errors in sequential results
@@ -145,13 +149,7 @@ class InvestigateTool(BaseSmartTool):
             
             # Only run parallel execution if not already done in sequential mode
             if performance_mode == "parallel":
-                routing_strategy = self.get_routing_strategy(files=files, problem=problem, **kwargs)
-                engines_used = routing_strategy['engines']
-                problem_type = routing_strategy['problem_type']
-                
                 analysis_results = {}
-                search_keywords = self._extract_search_keywords(problem)
-                quality_focus = self._map_problem_to_quality_focus(problem_type)
             
             # Group engines into parallel batches
             # Batch 1: Independent analysis engines

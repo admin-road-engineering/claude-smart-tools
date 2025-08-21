@@ -22,6 +22,11 @@ def setup_venv_environment():
     script_path = os.path.abspath(__file__)
     project_root = os.path.dirname(script_path)
     
+    # NEW: Store original user directory before changing
+    original_cwd = os.getcwd()
+    os.environ['SMART_TOOLS_USER_DIR'] = original_cwd
+    logger.info(f"Stored user's original directory: {original_cwd}")
+    
     logger.info("=== COMPREHENSIVE VENV DIAGNOSTIC INFORMATION ===")
     logger.info(f"Script location: {script_path}")
     logger.info(f"Project root: {project_root}")

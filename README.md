@@ -11,6 +11,7 @@ An intelligent MCP (Model Context Protocol) system that provides Claude with 7 p
 - **75-85% faster** - Parallel execution with memory safeguards
 - **Production ready** - Dual API key support with automatic rate limit recovery
 - **Terminal crash protection** - Smart truncation prevents buffer overflow (Fixed Aug 21, 2025)
+- **Enhanced model selection** - Pro, Flash, Flash-lite models intelligently assigned by complexity
 - **Comprehensive error handling** - Robust retry mechanisms and diagnostics
 
 ## 🎯 Project Goals: Tool Interface Revolution
@@ -155,12 +156,44 @@ claude --prompt "Use the understand tool to analyze this project's smart tool ar
 
 **Key Features:**
 - ✅ **Dual API Keys**: Automatic failover and 2x rate limit capacity
+- ✅ **Intelligent Model Selection**: Pro for complex analysis, Flash for security, Flash-lite for efficiency
 - ✅ **VENV Wrapper**: Proper environment isolation and path resolution
 - ✅ **Diagnostics**: Built-in environment validation and error reporting
 
+## 🤖 Enhanced Model Selection System
+
+**NEW**: Intelligent AI model assignment optimized for different analysis types and complexity levels.
+
+### Model Hierarchy:
+- **Gemini Pro**: Complex reasoning, dialogue, architectural analysis (3 tools)
+  - `review_output` - Technical dialogue and collaboration
+  - `analyze_code` - Deep code understanding and context awareness
+  - `full_analysis` - Multi-engine orchestration
+
+- **Gemini Flash**: Balanced analysis, security validation (7 tools)
+  - `check_quality` - Security-critical analysis
+  - `map_dependencies` - Graph analysis quality
+  - `performance_profiler` - Flow analysis 
+  - `analyze_logs` - Enhanced log processing capabilities
+  - `analyze_database` - SQL understanding and schema analysis
+  - `analyze_docs` - Document synthesis and analysis
+  - `analyze_test_coverage` - Test analysis and coverage insights
+
+- **Gemini Flash-Lite**: Simple pattern matching, fast validation (4 tools)
+  - `search_code` - Pattern matching and text search
+  - `api_contract_checker` - Schema parsing and validation
+  - `interface_inconsistency_detector` - Pattern matching for consistency
+  - `config_validator` - Simple configuration validation
+
+### Dynamic Upgrades:
+- **Comprehensive detail** → Automatically upgrades to Pro model
+- **Security focus** → Flash-lite upgrades to Flash minimum
+- **Large content (>2MB)** → Upgrades to Pro for context handling
+- **Medium content (>500KB)** → Flash-lite upgrades to Flash
+
 ## 🔗 Cross-Engine Correlation Framework
 
-**NEW**: Intelligent correlation analysis and conflict resolution for multi-engine results.
+**ENHANCED**: Intelligent correlation analysis and conflict resolution for multi-engine results.
 
 ### Features:
 - **Correlation Detection**: Identifies when engines confirm, complement, or contradict each other

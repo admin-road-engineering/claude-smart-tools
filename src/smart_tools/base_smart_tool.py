@@ -57,6 +57,7 @@ class BaseSmartTool(ABC):
         self.enable_correlation = os.environ.get('ENABLE_CORRELATION_ANALYSIS', 'true').lower() == 'true'
         
         # Initialize file content cache for this execution
+        from collections import OrderedDict
         self._file_content_cache = {}  # {file_path: (content, mtime)}
         self._cache_enabled = os.environ.get('ENABLE_FILE_CACHE', 'true').lower() == 'true'
         self._cache_hits = 0
@@ -69,8 +70,9 @@ class BaseSmartTool(ABC):
         self._cache_dir_limit = int(os.environ.get('CACHE_DIR_LIMIT', '100'))
         
         # Initialize project context reader
+        from collections import OrderedDict
         self.context_reader = get_project_context_reader()
-        self._project_context_cache = {}  # Cache project context per execution
+        self._project_context_cache = OrderedDict()  # LRU cache for project context
         
         # Configure retry behavior
         self._max_retries = int(os.environ.get('ENGINE_MAX_RETRIES', '3'))
@@ -85,6 +87,42 @@ class BaseSmartTool(ABC):
     @abstractmethod
     async def execute(self, **kwargs) -> SmartToolResult:
         """Execute the smart tool with intelligent routing"""
+        # Enhanced File validation - Check files exist, are readable, and are files (not directories)
+        if 'files' in kwargs:
+            original_files = kwargs['files']
+            
+            # Add type validation
+            if not isinstance(original_files, (list, tuple)):
+                original_files = [original_files]  # Convert single file to list
+            
+            valid_files = []
+            
+            for f in original_files:
+                if os.path.isfile(f):  # Check it's a file, not directory
+                    if os.access(f, os.R_OK):  # Check read permission
+                        valid_files.append(f)
+                    else:
+                        logger.warning(f"File not readable: {f}")
+                elif os.path.isdir(f):
+                    logger.warning(f"Path is a directory, not a file: {f}")
+                else:
+                    logger.warning(f"Path does not exist: {f}")
+            
+            if not valid_files:
+                return SmartToolResult(
+                    tool_name=self.tool_name,
+                    success=False,
+                    result="No valid files found to analyze",
+                    engines_used=[],
+                    routing_decision="File validation failed",
+                    metadata={
+                        'error': 'No valid readable files found',
+                        'skipped_files': list(set(original_files) - set(valid_files))
+                    }
+                )
+            kwargs['files'] = valid_files
+        
+        # Continue with normal execution
         pass
     
     @abstractmethod
@@ -128,10 +166,10 @@ class BaseSmartTool(ABC):
         for param in path_params:
             if param in normalized_kwargs:
                 value = normalized_kwargs[param]
-                # Use centralized path normalization
-                normalized_paths = normalize_paths(value)
+                # Use centralized path normalization with dependency filtering for smart tools
+                normalized_paths = normalize_paths(value, filter_dependencies=True)
                 normalized_kwargs[param] = normalized_paths
-                logger.debug(f"Normalized {param} using centralized path utils: {len(normalized_paths)} paths")
+                logger.debug(f"Normalized {param} with dependency filtering: {len(normalized_paths)} paths")
         
         # Pre-populate file content cache if enabled
         if self._cache_enabled and any(param in normalized_kwargs for param in path_params):
@@ -172,19 +210,63 @@ class BaseSmartTool(ABC):
                 await self.cpu_throttler.yield_if_needed()
     
     async def execute_multiple_engines(self, engine_names: List[str], **kwargs) -> Dict[str, Any]:
-        """Execute multiple engines with CPU-aware batching"""
+        """Execute multiple engines with CPU-aware batching and improved error handling"""
         results = {}
         
-        # Process engines with CPU throttling between each
+        # Fix 4: Error Handling - Continue processing even if individual engines fail
         if self.cpu_throttler:
             # Use throttled batch processing for large engine sets
             async for batch in self.cpu_throttler.throttled_batch_processing(engine_names, batch_size=3):
                 for engine_name in batch:
-                    results[engine_name] = await self.execute_engine(engine_name, **kwargs)
+                    try:
+                        result = await self.execute_engine(engine_name, **kwargs)
+                        
+                        # Check for structured success/error response
+                        if result and isinstance(result, dict) and result.get('success'):
+                            results[engine_name] = result
+                        elif result and isinstance(result, dict):
+                            # Log specific error from failed engine
+                            error_msg = result.get('error', 'Unknown failure')
+                            logger.warning(f"Engine {engine_name} failed: {error_msg}")
+                        else:
+                            # For non-dict results, check if it's an error string
+                            if isinstance(result, str) and result.startswith("❌"):
+                                logger.warning(f"Engine {engine_name} failed: {result}")
+                            else:
+                                # Treat as successful result
+                                results[engine_name] = result
+                                
+                    except Exception as e:
+                        logger.warning(f"Engine {engine_name} failed with exception: {e}")
+                        continue
         else:
-            # Fallback: execute all engines sequentially
+            # Fallback: execute all engines sequentially with error handling
             for engine_name in engine_names:
-                results[engine_name] = await self.execute_engine(engine_name, **kwargs)
+                try:
+                    result = await self.execute_engine(engine_name, **kwargs)
+                    
+                    # Check for structured success/error response
+                    if result and isinstance(result, dict) and result.get('success'):
+                        results[engine_name] = result
+                    elif result and isinstance(result, dict):
+                        # Log specific error from failed engine
+                        error_msg = result.get('error', 'Unknown failure')
+                        logger.warning(f"Engine {engine_name} failed: {error_msg}")
+                    else:
+                        # For non-dict results, check if it's an error string
+                        if isinstance(result, str) and result.startswith("❌"):
+                            logger.warning(f"Engine {engine_name} failed: {result}")
+                        else:
+                            # Treat as successful result
+                            results[engine_name] = result
+                            
+                except Exception as e:
+                    logger.warning(f"Engine {engine_name} failed with exception: {e}")
+                    continue
+        
+        # Return partial results instead of failing completely
+        if not results:
+            return {"error": "All engines failed"}
         
         return results
     
@@ -394,21 +476,49 @@ class BaseSmartTool(ABC):
                     files.append(str(value))
         return files
     
+    def _get_file_hash(self, file_path: str) -> str:
+        """Generate hash of file content for cache invalidation"""
+        import hashlib
+        try:
+            # For performance, only hash first 10KB of each file
+            with open(file_path, 'rb') as f:
+                return hashlib.md5(f.read(10240)).hexdigest()
+        except (IOError, OSError) as e:
+            logger.warning(f"Could not generate hash for {file_path}: {e}")
+            return None
+
     async def _get_project_context(self, files: List[str]) -> Dict[str, Any]:
-        """Get project context for the given files (cached per execution)"""
-        # Create a cache key from sorted file paths
-        cache_key = '|'.join(sorted(files[:5]))  # Use first 5 files for cache key
+        """Get project context with content-based cache invalidation"""
+        # Create cache key from ALL file hashes, not just first 5
+        file_hashes = []
+        for f in sorted(files):  # Sort for consistent key generation
+            hash_val = self._get_file_hash(f)
+            if hash_val:
+                file_hashes.append(f"{os.path.basename(f)}:{hash_val}")
+        
+        if not file_hashes:
+            # No valid files to hash, skip caching
+            logger.info(f"Reading project context for {len(files)} files (no cache)")
+            return self.context_reader.read_project_context(files)
+        
+        cache_key = '|'.join(file_hashes)
         
         if cache_key in self._project_context_cache:
             logger.debug(f"Using cached project context for {len(files)} files")
+            # Move to end to mark as recently used
+            self._project_context_cache.move_to_end(cache_key)
             return self._project_context_cache[cache_key]
         
-        # Read project context
+        # Read fresh context
         logger.info(f"Reading project context for {len(files)} files")
         context = self.context_reader.read_project_context(files)
-        
-        # Cache the context
         self._project_context_cache[cache_key] = context
+        
+        # Limit cache size efficiently with LRU eviction
+        if len(self._project_context_cache) > 10:
+            # Remove the oldest (first) item
+            self._project_context_cache.popitem(last=False)
+            logger.debug(f"Cache trimmed. Removed oldest entry.")
         
         # Log what we found
         if context.get('claude_md_content'):

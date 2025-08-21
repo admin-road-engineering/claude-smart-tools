@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import sys
+import time
 from typing import Any, Dict, List
 from datetime import datetime
 
@@ -154,12 +155,29 @@ class SmartToolsMcpServer:
                     logger.error(f"  - {os.path.abspath(path)}")
                 raise ImportError("gemini-engines directory not found in any expected location")
                 
-            # Add to path if not already there
+            # Add gemini-engines root to path to preserve package structure
             if gemini_engines_path not in sys.path:
                 sys.path.insert(0, gemini_engines_path)
                 logger.info(f"Added gemini-engines to Python path: {gemini_engines_path}")
                 
-            # Verify we can import
+            # Import configuration for terminal limits from gemini-engines
+            try:
+                from src.config import config
+                # Convert KB to bytes and define constants
+                MAX_TERMINAL_OUTPUT_BYTES = config.max_response_size_kb * 1024
+                TERMINAL_BUFFER_PADDING = 200  # Buffer for terminal formatting overhead, ANSI codes, etc.
+                logger.info(f"✅ Loaded config - Terminal limit: {MAX_TERMINAL_OUTPUT_BYTES:,} bytes")
+            except (ImportError, AttributeError) as config_error:
+                # Fallback if config import fails or wrong config object
+                MAX_TERMINAL_OUTPUT_BYTES = 5 * 1024 * 1024  # 5MB fallback
+                TERMINAL_BUFFER_PADDING = 200
+                logger.warning(f"Config import/access failed ({config_error}), using fallback limits")
+            
+            # Store as class attributes for use in methods
+            self.MAX_TERMINAL_OUTPUT_BYTES = MAX_TERMINAL_OUTPUT_BYTES
+            self.TERMINAL_BUFFER_PADDING = TERMINAL_BUFFER_PADDING
+            
+            # Verify we can import (using package structure)
             try:
                 from src.services.gemini_tool_implementations import GeminiToolImplementations
                 from src.clients.gemini_client import GeminiClient
@@ -610,26 +628,109 @@ class SmartToolsMcpServer:
             return f"Full analysis failed: {str(e)}"
     
     def _format_smart_tool_result(self, result: SmartToolResult) -> str:
-        """Format smart tool results for MCP response"""
+        """Format smart tool results for MCP response with terminal protection"""
         if not result.success:
-            return f"❌ {result.tool_name.title()} Tool Failed\n{result.result}"
+            # Better messaging for validation tools that "fail" when finding issues
+            if result.tool_name == "validate":
+                return f"⚠️ Validation Complete - Issues Identified\n{result.result}"
+            elif result.tool_name == "deploy":
+                return f"🚫 Deployment Check Complete - Do Not Deploy\n{result.result}"
+            else:
+                return f"❌ {result.tool_name.title()} Tool Failed\n{result.result}"
         
-        formatted = [
+        # Use configured limits (with fallback for safety)
+        max_terminal_output = getattr(self, 'MAX_TERMINAL_OUTPUT_BYTES', 5 * 1024 * 1024)
+        buffer_padding = getattr(self, 'TERMINAL_BUFFER_PADDING', 200)
+        
+        # Build base formatting
+        header = [
             f"# ✅ {result.tool_name.title()} Tool Results",
             f"**Engines Used**: {', '.join(result.engines_used)}",
             f"**Routing Decision**: {result.routing_decision}",
-            "",
-            result.result
+            ""
         ]
         
+        metadata_section = []
         if result.metadata:
-            formatted.extend([
+            metadata_section = [
                 "",
-                "## 📊 Analysis Metadata",
+                "## 📊 Analysis Metadata", 
                 json.dumps(result.metadata, indent=2)
-            ])
+            ]
+        
+        # Calculate sizes
+        header_text = '\n'.join(header)
+        metadata_text = '\n'.join(metadata_section)
+        available_space = max_terminal_output - len(header_text) - len(metadata_text) - buffer_padding
+        
+        # Check if result needs truncation
+        if len(result.result) > available_space:
+            # Save full result to temp file with proper error handling
+            success = self._save_large_result_to_file(result, header_text, metadata_text)
+            
+            if success['saved']:
+                # Create truncated version for terminal
+                truncated_result = result.result[:available_space]
+                last_newline = truncated_result.rfind('\n')
+                if last_newline > available_space * 0.8:  # Keep clean line breaks
+                    truncated_result = truncated_result[:last_newline]
+                
+                formatted = header + [
+                    f"🚨 **Large output detected - truncated for terminal safety**",
+                    f"📁 **Complete results saved to**: `{success['file_path']}`",
+                    f"📊 **Size**: {len(result.result):,} bytes (showing first {len(truncated_result):,} bytes)",
+                    "",
+                    truncated_result,
+                    "",
+                    "...**[Output truncated - see file above for complete results]**"
+                ] + metadata_section
+                
+            else:
+                # Fallback if file save fails  
+                truncated_result = result.result[:available_space]
+                formatted = header + [
+                    f"⚠️ **Large output truncated** (failed to save to file: {success['error']})",
+                    f"📊 **Size**: {len(result.result):,} bytes (showing first {len(truncated_result):,} bytes)",
+                    "",
+                    truncated_result,
+                    "",
+                    "...**[Output truncated]**"
+                ] + metadata_section
+        else:
+            # Normal formatting for reasonable sizes
+            formatted = header + [result.result] + metadata_section
         
         return '\n'.join(formatted)
+    
+    def _save_large_result_to_file(self, result: SmartToolResult, header_text: str, metadata_text: str) -> dict:
+        """
+        Safely save large result to temporary file.
+        Returns dict with 'saved' (bool), 'file_path' (str), and 'error' (str) keys.
+        """
+        try:
+            # Ensure temp directory exists
+            temp_dir = os.path.join(os.getcwd(), "temp_results") 
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            # Create unique filename
+            temp_filename = f"{result.tool_name}_{int(time.time())}.md"
+            temp_path = os.path.join(temp_dir, temp_filename)
+            
+            # Write complete results
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                f.write(f"# {result.tool_name.title()} Tool - Complete Results\n\n")
+                f.write(f"**Engines Used**: {', '.join(result.engines_used)}\n")
+                f.write(f"**Routing Decision**: {result.routing_decision}\n\n")
+                f.write(result.result)
+                if result.metadata:
+                    f.write(f"\n\n## Analysis Metadata\n{json.dumps(result.metadata, indent=2)}")
+            
+            logger.info(f"Saved large result to: {temp_path}")
+            return {'saved': True, 'file_path': temp_path, 'error': None}
+            
+        except Exception as e:
+            logger.error(f"Failed to save large result: {e}")
+            return {'saved': False, 'file_path': None, 'error': str(e)}
     
     async def run(self):
         """Run the MCP server with CPU throttling"""
