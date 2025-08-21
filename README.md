@@ -10,6 +10,7 @@ An intelligent MCP (Model Context Protocol) system that provides Claude with 7 p
 - **Executive synthesis** - Actionable insights, not just raw data
 - **75-85% faster** - Parallel execution with memory safeguards
 - **Production ready** - Dual API key support with automatic rate limit recovery
+- **Terminal crash protection** - Smart truncation prevents buffer overflow (Fixed Aug 21, 2025)
 - **Comprehensive error handling** - Robust retry mechanisms and diagnostics
 
 ## 🎯 Project Goals: Tool Interface Revolution
@@ -38,15 +39,21 @@ An intelligent MCP (Model Context Protocol) system that provides Claude with 7 p
 **Automatic Routing**: check_quality + config_validator + interface_inconsistency_detector + analyze_test_coverage + api_contract_checker + analyze_database + map_dependencies
 **Enhanced**: Comprehensive validation with test coverage and API contract checking
 
-### 4. `collaborate` ✅ **PRODUCTION READY**
+### 4. `collaborate` ✅ **PRODUCTION READY** 🔧 **MAJOR FIXES APPLIED**
 **Purpose**: Engage in technical dialogue, ask clarifying questions
 **Implementation**: Enhanced wrapper around proven review_output tool
 **Benefit**: Enterprise-grade code review with detailed analysis and recommendations
+**Recent Fixes**: 
+- ✅ **Terminal crash protection**: Smart truncation at 5MB with automatic file saving
+- ✅ **Smart Tool recommendations**: Now suggests Smart Tools instead of low-level Gemini tools
+- ✅ **File validation system**: Prevents hallucination by validating file references
+- ✅ **Security protection**: Path traversal detection and malicious input filtering
 
 ### 5. `full_analysis` ✅ **PRODUCTION READY**
 **Purpose**: Multi-tool orchestration for complex scenarios using smart tools
 **Smart Orchestration**: Coordinates understand + investigate + validate automatically  
 **Enhanced**: Correlation analysis and conflict resolution for multi-engine results
+**Modes**: Autonomous (complete analysis) and Dialogue (interactive multi-tool investigation)
 
 ### 6. `propose_tests` ✅ **PRODUCTION READY** 
 **Purpose**: Test coverage analysis and test generation
@@ -187,7 +194,10 @@ Claude sees: `understand`, `investigate`, `validate`, `collaborate`, `full_analy
 ### **System Status (August 2025):**
 ```bash
 ✅ ALL 7 SMART TOOLS WORKING
-✅ CRASH-FREE OPERATION: Event loop blocking fixes implemented
+✅ CRASH-FREE OPERATION: Terminal protection with 5MB truncation and file saving
+✅ SMART TOOL TRANSLATION: collaborate tool recommends Smart Tools, not Gemini tools
+✅ FILE VALIDATION SYSTEM: Prevents file hallucination with robust path checking
+✅ SECURITY PROTECTION: Path traversal detection and malicious input filtering
 ✅ 14 Engines Available: analyze_code, search_code, check_quality, analyze_docs, 
    analyze_logs, analyze_database, performance_profiler, config_validator, 
    api_contract_checker, analyze_test_coverage, map_dependencies, 

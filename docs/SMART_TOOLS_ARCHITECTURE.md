@@ -1,7 +1,7 @@
 # Smart Tools Architecture (January 2025)
 
 ## Summary
-This document describes the **actual working architecture** of the Claude Smart Tools system - the next-generation interface layer that consolidates 18 technical tools into 5 intuitive smart tools.
+This document describes the **actual working architecture** of the Claude Smart Tools system - the next-generation interface layer that consolidates 18 technical tools into 7 intuitive smart tools.
 
 ## ✅ How Smart Tools Actually Work
 
@@ -9,11 +9,13 @@ This document describes the **actual working architecture** of the Claude Smart 
 
 ```
 Smart Tools Layer (Claude Interface)
-├── understand_tool.py      ✅ Working - 3-engine coordination
-├── investigate_tool.py     📋 Coming Soon  
-├── validate_tool.py        📋 Coming Soon
-├── collaborate_tool.py     📋 Coming Soon
-└── full_analysis_tool.py   📋 Enhanced Version Coming
+├── understand_tool.py      ✅ Production Ready - Multi-engine coordination
+├── investigate_tool.py     ✅ Production Ready - Debug and performance analysis
+├── validate_tool.py        ✅ Production Ready - Security and quality validation
+├── collaborate_tool.py     ✅ Production Ready - Enhanced with file validation and Smart Tool recommendations
+├── propose_tests_tool.py   ✅ Production Ready - Test coverage and generation
+├── deploy_tool.py          ✅ Production Ready - Deployment readiness validation
+└── full_analysis_tool.py   ✅ Production Ready - Multi-tool orchestration with autonomous and dialogue modes
 
 Routing Layer (Intelligence)
 ├── intent_analyzer.py      ✅ Pattern-based intent analysis
@@ -127,8 +129,8 @@ test_strategy_flow, performance_audit_flow...
 
 ### **After: Claude's Intent-Based Clarity**
 ```
-✅ Claude sees 5 intent-based options:
-understand, investigate, validate, collaborate, full_analysis
+✅ Claude sees 7 intent-based options:
+understand, investigate, validate, collaborate, full_analysis, propose_tests, deploy
 
 ✅ Claude easily matches user intent to smart tool purpose:
 - "How does X work?" → understand tool

@@ -1,8 +1,13 @@
 # Claude Smart Tools - Intelligent MCP System
 
-## 🎯 Current Status: PRODUCTION READY (v1.2.0)
+## 🎯 Current Status: PRODUCTION READY (v1.3.0) - August 2025 ✅
 
-All 7 Smart Tools are fully operational with API key configuration fixes and dual key support for rate limiting.
+All 7 Smart Tools are fully operational with critical production fixes:
+- ✅ **Terminal crash protection**: Smart truncation at 5MB with automatic file saving
+- ✅ **Smart Tool recommendations**: collaborate tool now suggests Smart Tools, not Gemini tools  
+- ✅ **File validation system**: Prevents hallucination by validating all file references
+- ✅ **Security hardening**: Path traversal detection and malicious input filtering
+- ✅ **API key configuration**: Dual key support with automatic rate limit recovery
 
 ## 🚀 Quick Start
 
@@ -151,16 +156,34 @@ The system supports dual API key configuration for optimal rate limit handling:
 - **User Guide**: See README.md
 - **API Reference**: docs/SMART_TOOLS_CHEAT_SHEET.md
 - **Architecture**: docs/SMART_TOOLS_ARCHITECTURE.md
+- **August 2025 Enhancements**: docs/AUGUST_2025_ENHANCEMENTS.md
 - **Troubleshooting**: docs/VENV_TROUBLESHOOTING.md
 - **Environment Setup**: .env.example
 
 ## 🐛 Recent Fixes (August 2025)
 
-1. **File Access Resolution**: Fixed working directory issues breaking relative paths
-2. **Validation False Positives**: No longer reports "Passed" when no files analyzed
-3. **Memory Configuration**: All thresholds now configurable via environment
-4. **Retry Logic**: Exponential backoff for API failures
-5. **Error Reporting**: Clear messages with troubleshooting suggestions
+### Latest: Terminal Crash Prevention (August 21, 2025)
+1. **Terminal Buffer Overflow Fix**: Collaborate tool no longer crashes terminal with large outputs
+   - **Problem**: Large analysis results (>5MB) overwhelmed terminal display buffer
+   - **Solution**: Intelligent truncation with automatic file saving for complete results
+   - **User Experience**: Terminal shows summary + clear file path for full results
+
+2. **Configuration Integration**: Fixed disconnected hardcoded limits
+   - **Problem**: Terminal protection used hardcoded 5MB limit, ignoring config settings
+   - **Solution**: Uses `config.max_response_size_kb` with fallback safety
+   - **Result**: Respects environment variables for customization
+
+3. **Portable CPU Optimization**: Removed hardware-specific settings
+   - **Problem**: Default settings hardcoded for specific CPU (i5-12400F)
+   - **Solution**: Auto-detects CPU cores with `min(6, os.cpu_count() or 4)`
+   - **Result**: Optimal performance on any system
+
+### Previous Fixes
+4. **File Access Resolution**: Fixed working directory issues breaking relative paths
+5. **Validation False Positives**: No longer reports "Passed" when no files analyzed
+6. **Memory Configuration**: All thresholds now configurable via environment
+7. **Retry Logic**: Exponential backoff for API failures
+8. **Error Reporting**: Clear messages with troubleshooting suggestions
 
 ## 🚀 Next Steps
 
